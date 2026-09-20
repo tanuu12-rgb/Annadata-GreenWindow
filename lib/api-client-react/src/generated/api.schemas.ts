@@ -32,10 +32,10 @@ export interface CleanEnergyToday {
 
 export interface ScheduleRecommendation {
   date: string;
-  start_hour: number;
-  end_hour: number;
-  start_label: string;
-  end_label: string;
+  start_hour: number | null;
+  end_hour: number | null;
+  start_label: string | null;
+  end_label: string | null;
   duration_hours: number;
   reason: string;
   kwh_saved: number;

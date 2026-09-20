@@ -140,12 +140,16 @@ components:
           type: string
         start_hour:
           type: integer
+          nullable: true
         end_hour:
           type: integer
+          nullable: true
         start_label:
           type: string
+          nullable: true
         end_label:
           type: string
+          nullable: true
         duration_hours:
           type: integer
         reason:

@@ -33,10 +33,10 @@ export const GetCleanEnergyTodayResponse = zod.object({
   "source_note": zod.string(),
   "current_hour": zod.number().int(),
   "curve": zod.array(zod.object({
-  "hour": zod.number().int().min(getCleanEnergyTodayResponseCurveItemHourMin).max(getCleanEnergyTodayResponseCurveItemHourMax),
-  "label": zod.string(),
-  "clean_pct": zod.number().min(getCleanEnergyTodayResponseCurveItemCleanPctMin).max(getCleanEnergyTodayResponseCurveItemCleanPctMax)
-}))
+    "hour": zod.number().int().min(getCleanEnergyTodayResponseCurveItemHourMin).max(getCleanEnergyTodayResponseCurveItemHourMax),
+    "label": zod.string(),
+    "clean_pct": zod.number().min(getCleanEnergyTodayResponseCurveItemCleanPctMin).max(getCleanEnergyTodayResponseCurveItemCleanPctMax)
+  }))
 })
 
 
@@ -59,10 +59,10 @@ export const GetScheduleQueryParams = zod.object({
 
 export const GetScheduleResponse = zod.object({
   "date": zod.string(),
-  "start_hour": zod.number().int(),
-  "end_hour": zod.number().int(),
-  "start_label": zod.string(),
-  "end_label": zod.string(),
+  "start_hour": zod.number().int().nullable(),
+  "end_hour": zod.number().int().nullable(),
+  "start_label": zod.string().nullable(),
+  "end_label": zod.string().nullable(),
   "duration_hours": zod.number().int(),
   "reason": zod.string(),
   "kwh_saved": zod.number(),
@@ -100,10 +100,10 @@ export const ClassifyRipenessResponse = zod.object({
   "confidence_note": zod.string(),
   "cooling_state": zod.enum(['low', 'full']),
   "color_metrics": zod.object({
-  "green_score": zod.number(),
-  "ripe_score": zod.number(),
-  "dark_score": zod.number()
-})
+    "green_score": zod.number(),
+    "ripe_score": zod.number(),
+    "dark_score": zod.number()
+  })
 })
 
 
