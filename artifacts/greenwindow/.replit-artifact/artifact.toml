@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "GreenWindow"
+description = "A clean-energy-aware irrigation and storage scheduler for Indian farmers. It recommends pump windows when energy is clean and watering is needed, forecasts tomorrow's clean-energy curve, and demonstrates fruit ripeness-based cooling decisions."
+version = "1.0.0"
+id = "artifacts/greenwindow"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23709
+
+[services.development]
+run = "pnpm --filter @workspace/greenwindow run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/greenwindow", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/greenwindow/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23709"
+BASE_PATH = "/"

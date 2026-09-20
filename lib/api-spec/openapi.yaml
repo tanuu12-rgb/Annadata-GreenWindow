@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: greenwindow
+    description: Clean-energy-aware irrigation and storage scheduling
 paths:
   /healthz:
     get:
@@ -24,6 +26,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /clean-energy-today:
+    get:
+      operationId: getCleanEnergyToday
+      tags: [greenwindow]
+      summary: Get today's modeled clean-energy curve
+      responses:
+        "200":
+          description: Today's hourly clean-energy curve
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CleanEnergyToday"
+  /schedule:
+    get:
+      operationId: getSchedule
+      tags: [greenwindow]
+      summary: Recommend an irrigation window
+      parameters:
+        - name: soil_moisture
+          in: query
+          required: true
+          schema:
+            type: number
+            minimum: 0
+            maximum: 100
+        - name: crop_threshold
+          in: query
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            maximum: 100
+            default: 42
+      responses:
+        "200":
+          description: Schedule recommendation and savings comparison
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScheduleRecommendation"
+  /forecast:
+    get:
+      operationId: getForecast
+      tags: [greenwindow]
+      summary: Get tomorrow's clean-energy forecast
+      responses:
+        "200":
+          description: Forecast curve and holdout accuracy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForecastResult"
+  /ripeness:
+    post:
+      operationId: classifyRipeness
+      tags: [greenwindow]
+      summary: Classify fruit ripeness from an uploaded image
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/RipenessInput"
+      responses:
+        "200":
+          description: Ripeness classification and cooling recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RipenessResult"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +105,125 @@ components:
           type: string
       required:
         - status
+    CleanEnergyHour:
+      type: object
+      properties:
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        label:
+          type: string
+        clean_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+      required: [hour, label, clean_pct]
+    CleanEnergyToday:
+      type: object
+      properties:
+        date:
+          type: string
+        source_note:
+          type: string
+        current_hour:
+          type: integer
+        curve:
+          type: array
+          items:
+            $ref: "#/components/schemas/CleanEnergyHour"
+      required: [date, source_note, current_hour, curve]
+    ScheduleRecommendation:
+      type: object
+      properties:
+        date:
+          type: string
+        start_hour:
+          type: integer
+        end_hour:
+          type: integer
+        start_label:
+          type: string
+        end_label:
+          type: string
+        duration_hours:
+          type: integer
+        reason:
+          type: string
+        kwh_saved:
+          type: number
+        co2_avoided_kg:
+          type: number
+        clean_threshold:
+          type: number
+        soil_moisture:
+          type: number
+        watering_threshold:
+          type: number
+      required:
+        - date
+        - start_hour
+        - end_hour
+        - start_label
+        - end_label
+        - duration_hours
+        - reason
+        - kwh_saved
+        - co2_avoided_kg
+        - clean_threshold
+        - soil_moisture
+        - watering_threshold
+    ForecastResult:
+      type: object
+      properties:
+        date:
+          type: string
+        predicted_curve:
+          type: array
+          items:
+            type: number
+        actual_curve:
+          type: array
+          items:
+            type: number
+        mape:
+          type: number
+        model_used:
+          type: string
+        holdout_days:
+          type: integer
+      required: [date, predicted_curve, actual_curve, mape, model_used, holdout_days]
+    RipenessInput:
+      type: object
+      properties:
+        image_data:
+          type: string
+          description: Data URL or image identifier from the demo upload
+        image_name:
+          type: string
+      required: [image_data]
+    RipenessResult:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        classification:
+          type: string
+          enum: [unripe, ripe, spoiling]
+        confidence_note:
+          type: string
+        cooling_state:
+          type: string
+          enum: [low, full]
+        color_metrics:
+          type: object
+          properties:
+            green_score:
+              type: number
+            ripe_score:
+              type: number
+            dark_score:
+              type: number
+          required: [green_score, ripe_score, dark_score]
+      required: [timestamp, classification, confidence_note, cooling_state, color_metrics]
 

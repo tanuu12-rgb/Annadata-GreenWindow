@@ -1,6 +1,6 @@
-# [Project name]
+# GreenWindow
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+GreenWindow helps farmers schedule irrigation when clean energy is available and the field actually needs water.
 
 ## Run & Operate
 
@@ -22,15 +22,23 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/greenwindow/src/pages/home.tsx` — single-screen dashboard and interactive field controls
+- `artifacts/greenwindow/src/index.css` — GreenWindow visual theme and dashboard styling
+- `artifacts/api-server/src/routes/greenwindow.ts` — modeled energy curve, scheduling, forecast, and ripeness routes
+- `lib/api-spec/openapi.yaml` — source of truth for the GreenWindow API contract
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The first release uses deterministic modeled energy data so the judging demo never depends on a live grid API.
+- Soil moisture is a local simulated signal with a manual slider override; it is labeled as hardware-ready rather than presented as a real sensor.
+- The dashboard stays single-screen so the energy curve, recommendation, forecast, and storage decision are visible in one flow.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Shows a 24-hour clean-energy curve modeled on India Energy Atlas fuel-mix patterns.
+- Recommends a contiguous irrigation window based on clean energy and soil moisture need.
+- Compares the recommendation with a fixed schedule using kWh and CO₂ savings.
+- Displays a bilingual farmer alert, forecast holdout MAPE, and a sample/upload ripeness check that changes cooling state.
 
 ## User preferences
 

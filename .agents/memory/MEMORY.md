@@ -1,0 +1,1 @@
+- [Portable upload schemas](openapi-binary-schemas.md) — avoid generated Blob types in shared server-side Zod packages; use encoded strings for browser uploads.

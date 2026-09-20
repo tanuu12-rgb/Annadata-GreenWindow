@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface HealthStatus {
-  status: string;
-}
+export type RipenessResultColorMetrics = {
+  green_score: number;
+  ripe_score: number;
+  dark_score: number;
+};
