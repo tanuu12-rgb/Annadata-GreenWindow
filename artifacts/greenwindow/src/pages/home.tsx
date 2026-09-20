@@ -1,34 +1,45 @@
-import { AnomalyCard } from '../components/anomalycard';
-import { CameraPreviewModal } from '../components/camera-preview-modal';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
-  AlertCircle,
-  ArrowDownRight,
   ArrowRight,
   Camera,
   Check,
-  ChevronRight,
+  ChevronDown,
   CircleHelp,
-  Clock,
   CloudSun,
-  Copy,
   Droplets,
-  FileImage,
+  ExternalLink,
+  Fan,
   Info,
   Leaf,
+  Lightbulb,
   LoaderCircle,
-  LockKeyhole,
-  Radio,
-  RefreshCw,
-  Sliders,
-  Sparkles,
+  Mail,
+  Moon,
+  MoveRight,
+  Power,
+  RotateCcw,
+  Send,
+  ShieldCheck,
   Sprout,
-  SunMedium,
-  TrendingUp,
+  Sun,
+  ThermometerSun,
   Upload,
-  X,
   Zap,
 } from 'lucide-react';
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceArea,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { CameraPreviewModal } from '../components/camera-preview-modal';
 import {
   useClassifyRipeness,
   useGetCleanEnergyToday,
@@ -42,1185 +53,1357 @@ import type {
   ScheduleRecommendation,
 } from '@workspace/api-client-react';
 
-const SAMPLE_IMAGE = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640">
-    <rect width="960" height="640" fill="#dfe6cf"/>
-    <circle cx="780" cy="110" r="70" fill="#e9b451"/>
-    <path d="M0 500 C170 390 270 520 420 420 S720 370 960 460 V640 H0Z" fill="#6f9271"/>
-    <path d="M0 550 C160 470 300 590 480 490 S750 450 960 520 V640 H0Z" fill="#426c62"/>
-    <ellipse cx="510" cy="310" rx="92" ry="74" fill="#d98147"/>
-    <path d="M450 300 C445 182 560 170 602 250 C544 236 495 263 450 300Z" fill="#43775f"/>
-    <path d="M478 248 C510 177 590 196 616 246" fill="none" stroke="#28584e" stroke-width="16" stroke-linecap="round"/>
-  </svg>`,
-)}`;
+const gridMixDefault = [18, 14, 12, 10, 11, 18, 27, 38, 52, 64, 75, 82, 86, 84, 79, 70, 61, 57, 49, 42, 34, 29, 24, 20];
+const hours = ['12a', '1a', '2a', '3a', '4a', '5a', '6a', '7a', '8a', '9a', '10a', '11a', '12p', '1p', '2p', '3p', '4p', '5p', '6p', '7p', '8p', '9p', '10p', '11p'];
 
-type LinePoint = { x: number; y: number };
+const cropData = {
+  Tomato: { moisture: 42, threshold: 38, decay: [52, 49, 47, 44, 42, 39, 36, 34] },
+  Wheat: { moisture: 58, threshold: 45, decay: [67, 65, 63, 61, 58, 55, 53, 50] },
+  Rice: { moisture: 74, threshold: 62, decay: [82, 81, 79, 77, 74, 72, 69, 67] },
+  Cotton: { moisture: 36, threshold: 31, decay: [46, 43, 41, 39, 36, 33, 31, 28] },
+} as const;
 
-function formatDate(value?: string) {
-  if (!value) return 'Today';
-  const date = new Date(`${value}T12:00:00`);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+function energyColor(value: number) {
+  if (value >= 70) return 'bg-[#2d6a4f]';
+  if (value >= 50) return 'bg-[#527e4f]';
+  if (value >= 30) return 'bg-[#b7a04e]';
+  return 'bg-[#bb6b43]';
 }
 
-function formatHour(hour: number) {
-  const suffix = hour >= 12 ? 'PM' : 'AM';
-  const normalized = hour % 12 || 12;
-  return `${normalized} ${suffix}`;
-}
-
-function Skeleton({ className = '' }: { className?: string }) {
-  return <div className={`animate-pulse rounded-lg bg-neutral-200/70 ${className}`} />;
-}
-
-function ErrorState({ label, retry }: { label: string; retry: () => void }) {
-  return (
-    <div className="flex min-h-[110px] items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50/60 px-4 py-3 text-sm text-red-800">
-      <div className="flex items-center gap-3">
-        <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
-        <span>{label} is temporarily unavailable.</span>
-      </div>
-      <button
-        type="button"
-        onClick={retry}
-        data-testid={`button-retry-${label.toLowerCase().replaceAll(' ', '-')}`}
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 shadow-sm transition hover:bg-red-50"
-      >
-        <RefreshCw className="h-3.5 w-3.5" /> Retry
-      </button>
-    </div>
-  );
-}
-
-function CleanEnergyChart({
-  data,
-  currentHour,
-  startHour,
-  endHour,
+function SectionLabel({
+  number,
+  eyebrow,
+  title,
+  description,
 }: {
-  data: CleanEnergyToday;
-  currentHour: number;
-  startHour?: number | null;
-  endHour?: number | null;
+  number: string;
+  eyebrow: string;
+  title: string;
+  description?: string;
 }) {
-  const width = 760;
-  const height = 200;
-  const padX = 32;
-  const padY = 24;
-  const values = data.curve.map((point) => point.clean_pct);
-  const points: LinePoint[] = data.curve.map((point, index) => ({
-    x: padX + (index / Math.max(data.curve.length - 1, 1)) * (width - padX * 2),
-    y: height - padY - (point.clean_pct / 100) * (height - padY * 2),
-  }));
-  const line = points.map((point) => `${point.x},${point.y}`).join(' ');
-  const area = `${padX},${height - padY} ${line} ${width - padX},${height - padY}`;
-  const peak = Math.max(...values);
-  const peakHour = data.curve[values.indexOf(peak)]?.hour ?? 12;
-
-  // Compute recommended window overlay coordinates if provided
-  let windowBox: { x1: number; x2: number } | null = null;
-  if (startHour != null && endHour != null && startHour >= 0 && endHour <= 24) {
-    const x1 = padX + (startHour / 23) * (width - padX * 2);
-    const x2 = padX + (Math.min(endHour, 23) / 23) * (width - padX * 2);
-    windowBox = { x1, x2 };
-  }
-
   return (
-    <div className="relative mt-3">
-      <svg
-        viewBox={`0 0 ${width} ${height + 22}`}
-        className="h-auto w-full overflow-visible"
-        role="img"
-        aria-label="Today's clean energy curve"
-      >
-        <defs>
-          <linearGradient id="cleanEnergyGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.32" />
-            <stop offset="70%" stopColor="#10b981" stopOpacity="0.06" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
-          </linearGradient>
-          <linearGradient id="windowGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#059669" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="#059669" stopOpacity="0.04" />
-          </linearGradient>
-        </defs>
-
-        {/* Horizontal grid guide lines */}
-        {[25, 50, 75].map((mark) => {
-          const y = height - padY - (mark / 100) * (height - padY * 2);
-          return (
-            <g key={mark}>
-              <line
-                x1={padX}
-                x2={width - padX}
-                y1={y}
-                y2={y}
-                stroke="#e5e5e5"
-                strokeDasharray="3 4"
-                strokeWidth="1"
-              />
-              <text
-                x={padX - 8}
-                y={y + 3.5}
-                textAnchor="end"
-                fill="#a3a3a3"
-                fontSize="10"
-                className="gw-mono font-medium"
-              >
-                {mark}%
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Clean Energy Area Fill */}
-        <polygon points={area} fill="url(#cleanEnergyGrad)" />
-
-        {/* Recommended Irrigation Window Shading Band */}
-        {windowBox && (
-          <g>
-            <rect
-              x={windowBox.x1}
-              y={padY}
-              width={Math.max(windowBox.x2 - windowBox.x1, 16)}
-              height={height - padY * 2}
-              fill="url(#windowGrad)"
-              rx="6"
-            />
-            <rect
-              x={windowBox.x1}
-              y={padY}
-              width={Math.max(windowBox.x2 - windowBox.x1, 16)}
-              height={height - padY * 2}
-              fill="none"
-              stroke="#059669"
-              strokeWidth="1.5"
-              strokeDasharray="4 4"
-              rx="6"
-            />
-            <text
-              x={(windowBox.x1 + windowBox.x2) / 2}
-              y={padY - 8}
-              textAnchor="middle"
-              fill="#059669"
-              fontSize="10"
-              className="gw-mono font-bold"
-            >
-              ★ RECOMMENDED WINDOW
-            </text>
-          </g>
-        )}
-
-        {/* Clean Energy Primary Curve Line */}
-        <polyline
-          points={line}
-          fill="none"
-          stroke="#059669"
-          strokeWidth="2.75"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-
-        {/* Hourly node points */}
-        {data.curve.map((point, index) => {
-          if (index % 3 !== 0 && point.hour !== currentHour) return null;
-          const item = points[index];
-          const isCurrent = point.hour === currentHour;
-          return (
-            <g key={point.hour}>
-              {isCurrent && (
-                <>
-                  <line
-                    x1={item.x}
-                    x2={item.x}
-                    y1={padY}
-                    y2={height - padY}
-                    stroke="#10b981"
-                    strokeWidth="1.5"
-                    strokeDasharray="2 2"
-                  />
-                  <circle cx={item.x} cy={item.y} r="10" fill="#10b981" opacity="0.25" className="animate-ping" />
-                  <circle cx={item.x} cy={item.y} r="6" fill="#10b981" stroke="#ffffff" strokeWidth="2.5" />
-                </>
-              )}
-              {!isCurrent && (
-                <circle cx={item.x} cy={item.y} r="3.5" fill="#059669" stroke="#ffffff" strokeWidth="1.5" />
-              )}
-            </g>
-          );
-        })}
-
-        {/* Time X-Axis labels */}
-        {data.curve
-          .filter((point) => point.hour % 4 === 0)
-          .map((point) => {
-            const index = data.curve.findIndex((item) => item.hour === point.hour);
-            return (
-              <text
-                key={point.hour}
-                x={points[index].x}
-                y={height + 15}
-                textAnchor="middle"
-                fill="#737373"
-                fontSize="11"
-                className="gw-mono font-medium"
-              >
-                {point.label}
-              </text>
-            );
-          })}
-      </svg>
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-500 border-t border-neutral-100 pt-2.5">
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-600" /> Modelled clean generation (solar + wind)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm border border-emerald-600 bg-emerald-50" /> Recommended pumping window
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 font-medium text-neutral-700">
-          <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-          <span>Peak {peak}% clean energy at {formatHour(peakHour)}</span>
-        </div>
+    <div className="mb-6 flex items-start gap-4">
+      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-[#dfeee1] text-sm font-bold text-[#1b4332] dark:bg-[#274f3b] dark:text-[#d5f0d7]">
+        {number}
+      </span>
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#6b8b76]">{eyebrow}</p>
+        <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-[#1b4332] dark:text-[#edf7ed] sm:text-3xl">
+          {title}
+        </h2>
+        {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>}
       </div>
     </div>
   );
 }
 
-function ForecastChart({ data }: { data: ForecastResult }) {
-  const width = 720;
-  const height = 150;
-  const padX = 24;
-  const padY = 16;
-  const all = [...data.predicted_curve, ...data.actual_curve];
-  const max = Math.max(...all, 1);
-  const pointSet = (values: number[]) =>
-    values.map((value, index) => ({
-      x: padX + (index / 23) * (width - padX * 2),
-      y: height - padY - (value / max) * (height - padY * 2),
-    }));
-  const predicted = pointSet(data.predicted_curve);
-  const actual = pointSet(data.actual_curve);
+function Intro({ onDone }: { onDone: () => void }) {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setVisible(false);
+      onDone();
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [onDone]);
+
+  const bars = [18, 12, 9, 8, 9, 14, 22, 34, 49, 64, 78, 90, 96, 94, 87, 76, 63, 52, 42, 34, 27, 22, 19, 17];
 
   return (
-    <div>
-      <svg
-        viewBox={`0 0 ${width} ${height + 20}`}
-        className="mt-3 h-auto w-full"
-        role="img"
-        aria-label="Forecast compared with actual clean energy"
-      >
-        {[0, 1, 2].map((line) => (
-          <line
-            key={line}
-            x1={padX}
-            x2={width - padX}
-            y1={padY + line * ((height - padY * 2) / 2)}
-            y2={padY + line * ((height - padY * 2) / 2)}
-            stroke="#f0f0f0"
-            strokeDasharray="3 4"
-          />
-        ))}
-        {/* Actual curve */}
-        <polyline
-          points={actual.map((p) => `${p.x},${p.y}`).join(' ')}
-          fill="none"
-          stroke="#f59e0b"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-        {/* Predicted curve */}
-        <polyline
-          points={predicted.map((p) => `${p.x},${p.y}`).join(' ')}
-          fill="none"
-          stroke="#059669"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          strokeDasharray="5 5"
-        />
-        {[0, 6, 12, 18, 23].map((hour) => (
-          <text
-            key={hour}
-            x={actual[hour].x}
-            y={height + 14}
-            textAnchor="middle"
-            fill="#a3a3a3"
-            fontSize="10"
-            className="gw-mono"
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.65 }}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-[#1b4332] px-6 text-[#faf9f6]"
+          style={{
+            backgroundImage:
+              "linear-gradient(120deg, rgba(12, 48, 31, .9), rgba(35, 67, 35, .56)), url('/annadata-hero.png')",
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        >
+          <button
+            onClick={() => {
+              setVisible(false);
+              onDone();
+            }}
+            className="absolute right-6 top-6 rounded-full border border-white/20 px-4 py-2 text-xs font-semibold text-white/75 transition hover:bg-[#fffdf7]/10"
           >
-            {formatHour(hour)}
-          </text>
-        ))}
-      </svg>
-
-      <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
-        <div className="flex gap-4">
-          <span className="flex items-center gap-1.5">
-            <span className="h-0.5 w-4 bg-emerald-600" /> Model prediction
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-0.5 w-4 bg-amber-500" /> Observed benchmark
-          </span>
-        </div>
-        <span className="text-neutral-400">Seasonal baseline · hour smoothing</span>
-      </div>
-    </div>
-  );
-}
-
-function Modal({ onClose }: { onClose: () => void }) {
-  return (
-    <div
-      className="gw-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="how-it-works-title"
-    >
-      <button
-        type="button"
-        className="absolute inset-0 cursor-default bg-transparent"
-        onClick={onClose}
-        aria-label="Close modal backdrop"
-        data-testid="button-close-modal-backdrop"
-      />
-      <div className="gw-modal-panel relative z-10 max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl sm:p-8">
-        <button
-          type="button"
-          onClick={onClose}
-          data-testid="button-close-how-it-works"
-          className="absolute right-5 top-5 rounded-full p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
-        >
-          <X className="h-5 w-5" />
-        </button>
-
-        <div className="mb-6 pr-6">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
-            <Sparkles className="h-3 w-3 text-emerald-600" /> Decision Architecture
-          </span>
-          <h2 id="how-it-works-title" className="mt-2 text-2xl font-bold tracking-tight text-neutral-900">
-            One decision, three signals.
-          </h2>
-          <p className="mt-2 text-sm text-neutral-600 leading-relaxed">
-            GreenWindow synthesizes renewable grid availability, real-time soil thirst, and harvest condition to pinpoint the exact pump schedule before irrigation commences.
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          {[
-            {
-              icon: SunMedium,
-              number: '01',
-              title: 'Clean Grid Fuel-Mix Telemetry',
-              copy: 'We monitor the India Energy Atlas modeled diurnal clean energy curve to detect solar and wind generation surges.',
-            },
-            {
-              icon: Droplets,
-              number: '02',
-              title: 'Field Root-Zone Moisture Read',
-              copy: 'Soil moisture is continuously compared against your crop threshold (34%). The pump remains idle if moisture is sufficient.',
-            },
-            {
-              icon: Zap,
-              number: '03',
-              title: 'Optimal Window Optimization',
-              copy: 'When watering is required, GreenWindow automatically selects the cleanest contiguous hour block, maximizing CO₂ and kWh savings.',
-            },
-          ].map(({ icon: Icon, number, title, copy }) => (
-            <div
-              key={number}
-              className="flex gap-4 rounded-xl border border-neutral-200/90 bg-neutral-50/70 p-4 transition hover:bg-neutral-50"
+            Skip intro
+          </button>
+          <motion.div
+            initial={{ clipPath: 'inset(0 100% 0 0)' }}
+            animate={{ clipPath: 'inset(0 0% 0 0)' }}
+            transition={{ duration: 1.1, ease: 'easeOut' }}
+            className="text-5xl font-black tracking-tight sm:text-7xl"
+          >
+            अन्ना<span className="text-[#e9c46a]">data</span>
+          </motion.div>
+          <motion.p
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7 }}
+            className="mt-3 text-sm text-white/65 font-medium"
+          >
+            by Sonia Lotlikar and Tanaya Deshmukh
+          </motion.p>
+          <div className="relative mt-16 flex h-28 w-full max-w-xl items-end gap-1.5 px-2 sm:gap-2">
+            {bars.map((height, i) => (
+              <motion.div
+                key={i}
+                initial={{ height: 0 }}
+                animate={{ height: `${height}%` }}
+                transition={{ delay: 0.9 + i * 0.045, duration: 0.45, ease: 'easeOut' }}
+                className={`flex-1 rounded-t-sm ${i > 8 && i < 18 ? 'bg-[#7fb069]' : 'bg-[#e9c46a]'}`}
+              />
+            ))}
+            <motion.div
+              initial={{ left: '0%' }}
+              animate={{ left: '100%' }}
+              transition={{ delay: 1.1, duration: 1.8, ease: 'easeInOut' }}
+              className="absolute -top-8 -translate-x-1/2 text-[#f4d58d]"
             >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm">
-                <Icon className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="gw-mono text-[10px] font-bold text-emerald-700">{number} · STEP</p>
-                <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
-                <p className="mt-1 text-xs leading-5 text-neutral-600">{copy}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          data-testid="button-got-it"
-          className="mt-6 flex w-full items-center justify-center rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-800"
-        >
-          Got it, back to dashboard
-        </button>
-      </div>
-    </div>
+              <Sun className="size-8 fill-current" />
+            </motion.div>
+          </div>
+          <p className="mt-8 text-xs uppercase tracking-[.22em] text-white/40">
+            powering better decisions for every acre
+          </p>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
-function RipenessCard() {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<string>();
-  const [fileName, setFileName] = useState('');
-  const [result, setResult] = useState<RipenessResult>();
-  const [copied, setCopied] = useState(false);
+export default function Home() {
+  const [intro, setIntro] = useState(true);
+  const [solar, setSolar] = useState(false);
+  const [dark, setDark] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [crop, setCrop] = useState<keyof typeof cropData>('Tomato');
+  const [decayIndex, setDecayIndex] = useState(4);
+  const [moisture, setMoisture] = useState<number>(cropData.Tomato.moisture);
+  const [manualMoisture, setManualMoisture] = useState(false);
+  const [alertLang, setAlertLang] = useState<'English' | 'हिंदी / मराठी'>('English');
+  const [abnormal, setAbnormal] = useState(false);
+  const [sample, setSample] = useState<'Unripe' | 'Ripe' | 'Turning' | 'Spoiling'>('Turning');
+  const [cooling, setCooling] = useState(false);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const classify = useClassifyRipeness();
+  const [clock, setClock] = useState(new Date());
+  const [farmerEmail, setFarmerEmail] = useState('deshmukhtanaya90@gmail.com');
+  const [emailStatus, setEmailStatus] = useState<{ loading: boolean; success?: boolean; message?: string } | null>(null);
 
-  const submit = (imageData: string, imageName: string) => {
-    setPreview(imageData);
-    setFileName(imageName);
-    classify.mutate(
-      { data: { image_data: imageData, image_name: imageName } },
-      { onSuccess: (value) => setResult(value) },
-    );
+  const handleSendEmail = async (overrideRecipient?: string) => {
+    const toEmail = (overrideRecipient || farmerEmail || 'deshmukhtanaya90@gmail.com').trim();
+    setEmailStatus({ loading: true });
+    try {
+      const res = await fetch('/api/send-alert-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient_email: toEmail,
+          crop,
+          moisture,
+          threshold: currentCrop.threshold,
+          needs_water: needsWater,
+          window_display: windowDisplay,
+          location: 'Field 01 · Mumbai, MH',
+          lang: alertLang,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEmailStatus({
+          loading: false,
+          success: true,
+          message: data.message || `Advisory email successfully dispatched to ${toEmail}!`,
+        });
+      } else {
+        setEmailStatus({ loading: false, success: false, message: data.message || data.error || 'Failed to dispatch email.' });
+      }
+    } catch (err: any) {
+      setEmailStatus({ loading: false, success: false, message: err?.message || 'Network error while dispatching email.' });
+    }
   };
 
-  const onFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  // Real-time clock syncing
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setClock(new Date());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const timeString = useMemo(() => {
+    return clock.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  }, [clock]);
+
+  const clockHour = clock.getHours();
+  const clockMinute = clock.getMinutes();
+  const timeProgressPct = useMemo(() => {
+    const fraction = (clockHour + clockMinute / 60) / 24;
+    return Math.min(96, Math.max(4, Number((fraction * 100).toFixed(2))));
+  }, [clockHour, clockMinute]);
+
+  // Automated telemetry readings based on crop decay array
+  useEffect(() => {
+    if (manualMoisture) return;
+    const interval = window.setInterval(() => {
+      setDecayIndex((prev) => {
+        const arr = cropData[crop].decay;
+        const next = (prev + 1) % arr.length;
+        setMoisture(arr[next]);
+        return next;
+      });
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, [crop, manualMoisture]);
+
+  // Connect to live backend APIs
+  const energy = useGetCleanEnergyToday();
+  const forecastApi = useGetForecast();
+  const scheduleParams = useMemo(
+    () => ({ soil_moisture: moisture, crop_threshold: cropData[crop].threshold }),
+    [moisture, crop],
+  );
+  const schedule = useGetSchedule(scheduleParams);
+  const classify = useClassifyRipeness();
+
+  const currentCrop = cropData[crop];
+  const decay = useMemo(
+    () =>
+      currentCrop.decay.map((value, i) => ({
+        day: i,
+        moisture: manualMoisture ? Math.max(12, moisture - i * 2) : value,
+      })),
+    [currentCrop.decay, manualMoisture, moisture],
+  );
+
+  // Use backend energy curve if loaded, otherwise Annadata default
+  const gridMix = useMemo(() => {
+    if (energy.data?.curve && energy.data.curve.length === 24) {
+      return energy.data.curve.map((p) => p.clean_pct);
+    }
+    return gridMixDefault;
+  }, [energy.data]);
+
+  // Combine forecast data
+  const forecastChartData = useMemo(() => {
+    if (forecastApi.data?.predicted_curve && forecastApi.data?.actual_curve) {
+      return hours.map((hour, i) => ({
+        hour,
+        today: forecastApi.data?.actual_curve[i] ?? gridMix[i],
+        tomorrow: forecastApi.data?.predicted_curve[i] ?? gridMix[i],
+      }));
+    }
+    return hours.map((hour, i) => ({
+      hour,
+      today: gridMix[i],
+      tomorrow: Math.min(
+        95,
+        Math.max(
+          8,
+          gridMix[i] + [3, 2, 1, 1, 0, 2, 3, 2, 4, 3, 1, 0, -2, -1, 2, 3, 4, 1, 0, 3, 4, 2, 2, 1][i],
+        ),
+      ),
+    }));
+  }, [forecastApi.data, gridMix]);
+
+  const scheduleValue = schedule.data as ScheduleRecommendation | undefined;
+  const needsWater = moisture <= currentCrop.threshold;
+  const liveStart = scheduleValue?.start_label ?? '11 AM';
+  const liveEnd = scheduleValue?.end_label ?? '2 PM';
+  const windowDisplay = scheduleValue?.start_label
+    ? `${scheduleValue.start_label}–${scheduleValue.end_label}`
+    : '11 AM–2 PM';
+
+  const kwhSaved =
+    scheduleValue?.kwh_saved && scheduleValue.kwh_saved > 0
+      ? scheduleValue.kwh_saved
+      : 18.4;
+  const co2Avoided =
+    scheduleValue?.co2_avoided_kg && scheduleValue.co2_avoided_kg > 0
+      ? scheduleValue.co2_avoided_kg
+      : 12.7;
+
+  const verdict = sample === 'Spoiling' ? 'Spoiling risk' : sample === 'Ripe' ? 'Ripe' : sample === 'Turning' ? 'Turning' : 'Unripe';
+  const accent = verdict === 'Spoiling risk' ? 'amber' : verdict === 'Ripe' ? 'green' : 'slate';
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const onFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => submit(String(reader.result), file.name);
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      classify.mutate(
+        { data: { image_data: dataUrl, image_name: file.name } },
+        {
+          onSuccess: (res) => {
+            if (res.classification === 'spoiling') setSample('Spoiling');
+            else if (res.classification === 'ripe') setSample('Ripe');
+            else setSample('Unripe');
+            if (res.cooling_state === 'full') setCooling(true);
+          },
+        },
+      );
+    };
     reader.readAsDataURL(file);
   };
 
-  const copyResult = async () => {
-    if (!result) return;
-    await navigator.clipboard?.writeText(
-      `Crop check: ${result.classification}. Cooling: ${result.cooling_state}. ${result.confidence_note}`,
+  const handleCameraCapture = (imageDataUrl: string, imageName: string) => {
+    classify.mutate(
+      { data: { image_data: imageDataUrl, image_name: imageName } },
+      {
+        onSuccess: (res) => {
+          if (res.classification === 'spoiling') setSample('Spoiling');
+          else if (res.classification === 'ripe') setSample('Ripe');
+          else setSample('Unripe');
+          if (res.cooling_state === 'full') setCooling(true);
+        },
+      },
     );
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
   };
 
   return (
-    <section className="gw-card p-6" data-testid="card-ripeness">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="gw-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-              06 / CROP TELEMETRY
-            </span>
-            <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-              Optical HSV
-            </span>
-          </div>
-          <h2 className="mt-1 text-lg font-bold text-neutral-900">Ripeness Desk & Field Camera</h2>
-          <p className="mt-0.5 text-xs text-neutral-500">
-            Instant optical spectrometry check before scheduling harvest rounds or storage cooling.
-          </p>
-        </div>
-        <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-2 text-neutral-600">
-          <Leaf className="h-5 w-5 text-emerald-600" />
-        </div>
-      </div>
+    <div className={dark ? 'dark' : ''}>
+      <AnimatePresence>{intro && <Intro onDone={() => setIntro(false)} />}</AnimatePresence>
 
-      <div className="mt-5 grid gap-5 sm:grid-cols-[140px_1fr]">
-        <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100 shadow-inner">
-          {preview ? (
-            <img
-              src={preview}
-              alt="Selected crop sample"
-              className="h-full w-full object-cover"
-              data-testid="img-ripeness-preview"
+      <main className="min-h-screen overflow-hidden bg-[#efe8d8] text-[#1b4332] dark:bg-[#12231b] dark:text-[#edf7ed]">
+        {/* Ambient atmospheric orbs */}
+        <div className="pointer-events-none fixed inset-0 z-10 opacity-60 dark:opacity-40">
+          <div className="ambient-orb ambient-orb-one" />
+          <div className="ambient-orb ambient-orb-two" />
+        </div>
+
+        {/* Sticky Header */}
+        <header className="sticky top-0 z-30 border-b border-[#dce9df] bg-[#e8efe5]/90 backdrop-blur-xl dark:border-white/10 dark:bg-[#12231b]/90">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
+            <div className="flex items-center gap-3" data-testid="brand-greenwindow">
+              <div className="flex size-10 items-center justify-center rounded-xl bg-[#1b4332] text-lg font-black text-[#e9c46a] shadow-lg shadow-[#1b4332]/15">
+                अ
+              </div>
+              <div>
+                <div className="text-lg font-black leading-none">
+                  अन्ना<span className="text-[#c8942c]">data</span>
+                </div>
+                <div className="mt-1 hidden text-[10px] font-semibold tracking-wide text-muted-foreground sm:block">
+                  Technology ki soch, kheti ki nayi khoj
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 sm:gap-4">
+              <div className="hidden items-center gap-2 rounded-full border border-[#dce9df] bg-white/60 p-1 text-xs font-bold dark:border-white/10 dark:bg-[#fffdf7]/5 sm:flex">
+                <button
+                  type="button"
+                  onClick={() => setSolar(false)}
+                  className={`rounded-full px-3 py-1.5 transition ${
+                    !solar ? 'bg-[#1b4332] text-white' : 'text-muted-foreground'
+                  }`}
+                >
+                  Grid pump
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSolar(true)}
+                  className={`rounded-full px-3 py-1.5 transition ${
+                    solar ? 'bg-[#1b4332] text-white' : 'text-muted-foreground'
+                  }`}
+                >
+                  Solar pump
+                </button>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Toggle theme"
+                onClick={() => setDark(!dark)}
+                className="rounded-full border border-[#dce9df] p-2.5 text-muted-foreground transition hover:bg-[#eaf3e9] dark:border-white/10 dark:hover:bg-[#fffdf7]/10"
+              >
+                {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+              </button>
+
+              <button
+                type="button"
+                aria-label="How it works"
+                onClick={() => setHelp(true)}
+                data-testid="button-how-it-works"
+                className="rounded-full border border-[#dce9df] p-2.5 text-muted-foreground transition hover:bg-[#eaf3e9] dark:border-white/10 dark:hover:bg-[#fffdf7]/10"
+              >
+                <CircleHelp className="size-4" />
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Content Body */}
+        <div className="mx-auto max-w-7xl px-5 pb-16 pt-6 sm:px-8 sm:pt-8">
+          {/* Hero Section */}
+          <section className="hero-panel relative isolate mb-16 min-h-[430px] overflow-hidden rounded-[2rem] bg-[#203b27] shadow-[0_24px_80px_rgba(27,67,50,.25)]">
+            <div
+              className="absolute inset-0 z-0 bg-cover bg-center transition-transform duration-1000 hover:scale-105"
+              style={{ backgroundImage: "url('/annadata-hero.png')" }}
             />
-          ) : (
-            <div className="flex flex-col items-center gap-1.5 text-neutral-400">
-              <FileImage className="h-8 w-8 text-neutral-400" />
-              <span className="text-[10px] font-medium text-neutral-500">No Image</span>
+            <div className="absolute inset-0 z-10 bg-gradient-to-r from-[#142b1c]/55 via-[#1e3c24]/25 to-[#7d6a2a]/5" />
+            <div className="absolute inset-x-0 bottom-0 z-10 h-40 bg-gradient-to-t from-[#12291b]/45 to-transparent" />
+
+            <div className="absolute right-7 top-7 hidden rounded-2xl border border-white/20 bg-[#17351f]/55 p-4 text-white shadow-2xl backdrop-blur-md sm:block">
+              <div className="flex items-center gap-2 text-xs font-bold">
+                <span className="size-2 animate-pulse rounded-full bg-[#b7d88b]" />
+                FIELD SIGNALS LIVE
+              </div>
+              <p className="mt-2 text-[11px] text-white/65">Mumbai, Maharashtra · {timeString}</p>
             </div>
-          )}
-          {classify.isPending && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-white backdrop-blur-xs">
-              <LoaderCircle className="h-7 w-7 animate-spin text-emerald-400" />
-            </div>
-          )}
-        </div>
 
-        <div className="flex flex-col justify-center">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            onChange={onFileChange}
-            className="hidden"
-            data-testid="input-ripeness-file"
-          />
-
-          <div className="flex flex-wrap gap-2.5">
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              data-testid="button-upload-ripeness"
-              className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-neutral-800"
-            >
-              <Upload className="h-3.5 w-3.5" /> Upload photo
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsCameraOpen(true)}
-              data-testid="button-use-ripeness-sample"
-              className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-xs font-semibold text-neutral-800 shadow-sm transition hover:bg-neutral-50 hover:border-neutral-300"
-            >
-              <Camera className="h-3.5 w-3.5 text-emerald-600" /> Use field sample
-            </button>
-          </div>
-
-          <p className="mt-2 text-[11px] text-neutral-500">
-            {fileName || 'Live WebCam capture, camera preview, or JPG/PNG upload.'}
-          </p>
-        </div>
-      </div>
-
-      {classify.isError && (
-        <p className="mt-4 flex items-center gap-2 text-xs font-medium text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">
-          <AlertCircle className="h-4 w-4 shrink-0" /> Could not classify that image. Try a clearer crop photo.
-        </p>
-      )}
-
-      {result && (
-        <div
-          className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50/80 p-4.5"
-          data-testid="status-ripeness-result"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="gw-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                Spectrometry Result
+            <div className="relative z-20 flex min-h-[430px] flex-col justify-end p-7 text-white sm:p-12">
+              <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-[#fffdf7]/10 px-3 py-1.5 text-xs font-bold backdrop-blur-md">
+                <span className="size-1.5 rounded-full bg-[#f4d58d]" />
+                Live planning workspace
+              </div>
+              <h1 className="max-w-3xl text-5xl font-black leading-[.98] tracking-[-.055em] drop-shadow-lg sm:text-8xl">
+                अन्न<span className="text-[#f4d58d]">दाता</span>
+              </h1>
+              <p className="mt-4 max-w-xl text-base font-medium leading-7 text-white/80 sm:text-lg">
+                Technology ki soch, kheti ki nayi khoj — helping farmers grow more with cleaner power and timely decisions.
               </p>
-              <p className="mt-0.5 text-lg font-bold capitalize text-neutral-900">{result.classification}</p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <a
+                  href="#energy"
+                  className="rounded-full bg-[#f4d58d] px-5 py-3 text-sm font-extrabold text-[#24452a] shadow-lg transition hover:-translate-y-1 hover:bg-[#fffdf7]"
+                >
+                  Explore today&apos;s clean hours <ArrowRight className="ml-2 inline size-4" />
+                </a>
+                <a
+                  href="#moisture"
+                  className="rounded-full border border-white/30 bg-[#fffdf7]/10 px-5 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-[#fffdf7]/20"
+                >
+                  Check my field
+                </a>
+              </div>
             </div>
-            <span
-              className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider border ${
-                result.cooling_state === 'full'
-                  ? 'border-amber-300 bg-amber-50 text-amber-800'
-                  : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              }`}
-            >
-              Cooling requirement: {result.cooling_state}
-            </span>
+
+            <div className="absolute bottom-5 right-7 hidden items-center gap-2 text-[10px] font-bold uppercase tracking-[.18em] text-white/55 lg:flex">
+              <Leaf className="size-4" />
+              Built for every acre
+            </div>
+          </section>
+
+          {/* Clean Energy Title Block */}
+          <div id="energy" className="mb-12 max-w-3xl">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-[#e8f2e8] px-3 py-1.5 text-xs font-bold text-[#467452] dark:bg-[#204633] dark:text-[#c9e8cd]">
+              <span className="size-1.5 rounded-full bg-[#5f9f68]" />
+              Clean energy dashboard
+            </div>
+            <h2 className="text-4xl font-black leading-[1.05] tracking-[-.04em] text-[#1b4332] dark:text-[#f1f8f1] sm:text-6xl">
+              Let clean power<br />
+              <span className="text-[#c8942c]">work for your crop.</span>
+            </h2>
+            <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
+              An AI scheduler for Indian farms that runs pumps and cooling only when the grid is clean and the crop actually needs it.
+            </p>
           </div>
 
-          <p className="mt-2 text-xs text-neutral-600 leading-relaxed">{result.confidence_note}</p>
+          {/* Section 01: Clean Energy Timeline */}
+          <section className="mb-16" data-testid="card-clean-energy">
+            <SectionLabel
+              number="01"
+              eyebrow="Clean energy today"
+              title="A better hour to run your pump"
+              description="The cleanest hours are not always the same as the convenient ones. Annadata finds the overlap."
+            />
+            <div className="overflow-hidden rounded-2xl border border-[#cfe0d2] bg-[#fffdf7] p-4 shadow-[0_12px_45px_rgba(27,67,50,.07)] dark:border-white/10 dark:bg-[#1a3327] sm:p-6">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-[#e9f3e9] dark:bg-[#204633]">
+                    <CloudSun className="size-4 text-[#477653] dark:text-[#b7d88b]" />
+                  </span>
+                  Grid cleanliness by hour{' '}
+                  <span className="font-normal text-muted-foreground">
+                    · modeled from India Energy Atlas fuel-mix patterns
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <i className="size-2 rounded-full bg-[#bb6b43]" />
+                    Coal-heavy
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <i className="size-2 rounded-full bg-[#2d6a4f]" />
+                    Cleaner mix
+                  </span>
+                </div>
+              </div>
 
-          <div className="mt-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
-              Color Channel Distribution
-            </p>
-            <div className="flex items-end gap-3">
-              {Object.entries(result.color_metrics).map(([key, value]) => (
-                <div key={key} className="flex-1">
-                  <div className="mb-1 flex justify-between text-[11px] font-medium text-neutral-600">
-                    <span className="capitalize">{key.replace('_score', '')}</span>
-                    <span className="gw-mono">{Math.round(value * 100)}%</span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-neutral-200">
-                    <div
-                      className={`h-full rounded-full ${
-                        key === 'green_score'
-                          ? 'bg-emerald-500'
-                          : key === 'ripe_score'
-                          ? 'bg-red-500'
-                          : 'bg-neutral-800'
+              <div className="relative pt-8">
+                <div
+                  className="pointer-events-none absolute top-0 z-20 flex -translate-x-1/2 flex-col items-center transition-all duration-500"
+                  style={{ left: `${timeProgressPct}%` }}
+                >
+                  <span className="rounded-full bg-[#1b4332] px-2.5 py-1 text-[10px] font-black text-white shadow-lg whitespace-nowrap">
+                    NOW · {timeString}
+                  </span>
+                  <span className="h-5 border-l-2 border-dashed border-[#1b4332] dark:border-[#b7d88b]" />
+                </div>
+
+                <div
+                  className="grid grid-cols-24 gap-1"
+                  style={{ gridTemplateColumns: 'repeat(24, minmax(20px, 1fr))' }}
+                >
+                  {gridMix.map((value, i) => (
+                    <motion.div
+                      key={i}
+                      layout
+                      transition={{ duration: 0.25 }}
+                      className={`relative flex h-24 min-w-0 flex-col items-center justify-end rounded-md px-1 py-2 text-[10px] font-bold text-white ${energyColor(
+                        value,
+                      )} ${
+                        i >= 11 && i <= 14
+                          ? 'ring-2 ring-white ring-offset-2 ring-offset-[#faf9f6] dark:ring-offset-[#1a3327]'
+                          : ''
                       }`}
-                      style={{ width: `${Math.min(value * 100, 100)}%` }}
+                    >
+                      <span>{value}%</span>
+                      <span
+                        className="mt-1 w-px bg-[#fffdf7]/35"
+                        style={{ height: `${Math.max(10, value / 3)}px` }}
+                      />
+                    </motion.div>
+                  ))}
+                </div>
+
+                <div
+                  className="mt-2 grid grid-cols-24 gap-1 text-center text-[9px] text-muted-foreground"
+                  style={{ gridTemplateColumns: 'repeat(24, minmax(20px, 1fr))' }}
+                >
+                  {hours.map((hour) => (
+                    <span key={hour}>{hour}</span>
+                  ))}
+                </div>
+
+                <div className="mt-5 flex items-center justify-center">
+                  <div className="flex items-center gap-2 rounded-full border border-[#aecbb1] bg-[#f3faf2] px-4 py-2 text-xs font-bold text-[#1b4332] shadow-sm dark:border-white/10 dark:bg-[#204633] dark:text-[#d6f1d7]">
+                    <span className="flex size-5 items-center justify-center rounded-full bg-[#2d6a4f] text-white">
+                      <Check className="size-3" />
+                    </span>
+                    Run pump {windowDisplay}{' '}
+                    <span className="font-normal text-muted-foreground">· best clean-energy overlap</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 02 & 03: Soil Moisture & Best Window */}
+          <div id="moisture" className="grid gap-8 lg:grid-cols-[1.04fr_.96fr]">
+            {/* Section 02: Soil Moisture */}
+            <section data-testid="card-soil-control">
+              <SectionLabel
+                number="02"
+                eyebrow="Soil moisture"
+                title="Know before you water"
+                description="A quick read on what the crop needs next."
+              />
+              <div className="rounded-2xl border border-[#cfe0d2] bg-[#fffdf7] p-6 shadow-[0_12px_45px_rgba(27,67,50,.06)] dark:border-white/10 dark:bg-[#1a3327]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Droplets className="size-4 text-[#5f9f68]" />
+                    <span className="text-sm font-bold">Field 01 · Mumbai, MH</span>
+                  </div>
+                  <div className="relative">
+                    <select
+                      value={crop}
+                      onChange={(e) => {
+                        const next = e.target.value as keyof typeof cropData;
+                        setCrop(next);
+                        setDecayIndex(0);
+                        setMoisture(cropData[next].decay[0]);
+                        setManualMoisture(false);
+                      }}
+                      className="appearance-none rounded-lg border border-[#dce9df] bg-[#f7faf6] py-2 pl-3 pr-8 text-xs font-bold text-[#1b4332] outline-none dark:border-white/10 dark:bg-[#fffdf7]/5 dark:text-white"
+                    >
+                      {Object.keys(cropData).map((item) => (
+                        <option key={item}>{item}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-2 top-2.5 size-3.5" />
+                  </div>
+                </div>
+
+                <div className="mt-8 flex items-end justify-between">
+                  <div>
+                    <span
+                      className="text-7xl font-black tracking-[-.08em] text-[#1b4332] dark:text-[#eaf6ea]"
+                      data-testid="text-soil-moisture"
+                    >
+                      {moisture}
+                    </span>
+                    <span className="ml-1 text-2xl font-extrabold text-[#80a584]">%</span>
+                    <div className="mt-1 flex items-center gap-2">
+                      <p className="text-xs font-semibold text-muted-foreground">current moisture</p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          moisture > currentCrop.threshold
+                            ? 'bg-[#d8eed8] text-[#24583b] dark:bg-[#204633] dark:text-[#b6dfa9]'
+                            : 'bg-[#ffeed6] text-[#b36200] dark:bg-[#4d3215] dark:text-[#f3c27e]'
+                        }`}
+                      >
+                        {moisture > currentCrop.threshold ? 'Soil is wet' : 'Needs water'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="rounded-xl bg-[#eff7ed] px-3 py-2 text-right text-xs font-bold text-[#477653] dark:bg-[#204633] dark:text-[#c9e8cd]">
+                    <span className="block text-lg">{currentCrop.threshold}%</span>
+                    watering threshold
+                  </div>
+                </div>
+
+                <div className="relative mt-8">
+                  <input
+                    aria-label="Soil moisture"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={moisture}
+                    onChange={(e) => {
+                      setMoisture(Number(e.target.value));
+                      setManualMoisture(true);
+                    }}
+                    data-testid="input-soil-moisture"
+                    className="relative z-10 h-2 w-full cursor-pointer appearance-none rounded-full bg-[#dce9df] accent-[#1b4332]"
+                  />
+                  <div
+                    className="pointer-events-none absolute -top-1 h-4 w-0.5 bg-[#c8942c]"
+                    style={{ left: `${currentCrop.threshold}%` }}
+                  />
+                  <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
+                    <span>Dry</span>
+                    <span className="text-[#c8942c]">Threshold ({currentCrop.threshold}%)</span>
+                    <span>Wet</span>
+                  </div>
+                </div>
+
+                <div className="mt-8 h-20">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={decay}>
+                      <Line type="monotone" dataKey="moisture" stroke="#5f9f68" strokeWidth={3} dot={false} />
+                      <Line
+                        type="monotone"
+                        dataKey={() => currentCrop.threshold}
+                        stroke="#c8942c"
+                        strokeDasharray="4 4"
+                        strokeWidth={1.5}
+                        dot={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>Moisture decay · next 8 days</span>
+                  {manualMoisture && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDecayIndex(0);
+                        setMoisture(cropData[crop].decay[0]);
+                        setManualMoisture(false);
+                      }}
+                      className="flex items-center gap-1 font-bold text-[#1b4332] dark:text-[#d7efd8]"
+                    >
+                      <RotateCcw className="size-3" /> Resume decay
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-5 flex items-center gap-2 rounded-lg bg-[#f7faf6] px-3 py-2 text-[11px] text-muted-foreground dark:bg-[#fffdf7]/5">
+                  <ShieldCheck className="size-4 shrink-0 text-[#5f9f68]" />
+                  Simulated. Hardware-ready for capacitive soil sensor input
+                </div>
+              </div>
+            </section>
+
+            {/* Section 03: Best Irrigation Window */}
+            <section data-testid="card-recommendation">
+              <SectionLabel
+                number="03"
+                eyebrow="Best irrigation window"
+                title="Make the next run count"
+                description="The scheduler balances clean energy with crop demand."
+              />
+              <div className="relative overflow-hidden rounded-2xl bg-[#1b4332] p-7 text-white shadow-[0_18px_55px_rgba(27,67,50,.22)] sm:p-8">
+                <div className="absolute -right-14 -top-14 size-44 rounded-full bg-[#2d6a4f]/60 blur-2xl" />
+                <div className="relative">
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={`rounded-full border px-3 py-1.5 text-[11px] font-bold transition ${
+                        needsWater
+                          ? 'border-white/15 bg-[#fffdf7]/10 text-[#d8efd8]'
+                          : 'border-[#81c784]/30 bg-[#81c784]/20 text-[#b6dfa9]'
+                      }`}
+                    >
+                      {needsWater ? 'Recommended next run' : 'Holding · Soil is wet'}
+                    </span>
+                    <Zap className={`size-5 ${needsWater ? 'text-[#e9c46a]' : 'text-[#81c784]'}`} />
+                  </div>
+
+                  <div
+                    className={`mt-8 font-black tracking-[-.05em] leading-tight transition-all ${
+                      needsWater ? 'text-5xl sm:text-6xl text-white' : 'text-3xl sm:text-4xl text-[#eef6ed]'
+                    }`}
+                    data-testid="text-irrigation-window"
+                  >
+                    {needsWater ? windowDisplay : 'Holding — No watering needed'}
+                  </div>
+                  <p className="mt-4 max-w-sm text-sm leading-6 text-white/75" data-testid="text-recommendation-reason">
+                    {needsWater
+                      ? (scheduleValue?.reason ||
+                        `The grid is cleanest while your ${crop.toLowerCase()} is nearing its watering threshold. Shift the run, keep the harvest steady.`)
+                      : `Soil is wet (${moisture}%), above the ${currentCrop.threshold}% watering threshold for ${crop.toLowerCase()}. Watering is not needed right now — holding the pump to save power and water.`}
+                  </p>
+
+                  <div className="my-8 grid grid-cols-2 gap-4 border-y border-white/15 py-6">
+                    <div>
+                      <div className="text-3xl font-black text-[#e9c46a]">
+                        {kwhSaved} <span className="text-base">kWh</span>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-4 text-white/55">
+                        {needsWater
+                          ? 'coal-sourced power avoided vs fixed 6 AM start'
+                          : 'power saved by holding pump while soil is wet'}
+                      </p>
+                    </div>
+                    <div>
+                      <div className="text-3xl font-black text-[#b6dfa9]">
+                        {co2Avoided} <span className="text-base">kg</span>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-4 text-white/55">
+                        CO2 avoided · 120-day season total
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-white/55">
+                    {solar
+                      ? 'Solar pump mode: use the sunniest hours to top up your battery.'
+                      : needsWater
+                      ? 'Grid pump mode: choosing the cleanest available grid window.'
+                      : `Grid pump mode: pump idle while soil is wet (${moisture}%). Will resume when nearing ${currentCrop.threshold}%.`}
+                  </p>
+
+                  <div className="mt-7 flex items-center justify-between rounded-xl bg-[#fffdf7]/10 px-4 py-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold">
+                      <Power className="size-4 text-[#b6dfa9]" />
+                      Pump check
+                      <span className="ml-1 flex size-2 rounded-full bg-[#81c784]" />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAbnormal(!abnormal)}
+                      className="rounded-lg bg-[#fffdf7]/10 px-3 py-2 text-[11px] font-bold transition hover:bg-[#fffdf7]/20"
+                    >
+                      {abnormal ? 'Reset check' : 'Simulate abnormal run'}
+                    </button>
+                  </div>
+
+                  {abnormal && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="mt-3 rounded-lg border border-[#e9c46a]/30 bg-[#e9c46a]/10 px-4 py-3 text-xs font-semibold leading-5 text-[#f5dc99]"
+                    >
+                      This pump used 40% more energy than its normal pattern. Check for leaks.
+                    </motion.div>
+                  )}
+
+                  <div className="mt-5 border-t border-white/10 pt-4 flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSendEmail(farmerEmail)}
+                      disabled={emailStatus?.loading}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 py-2.5 px-4 text-xs font-bold text-white backdrop-blur transition hover:bg-white/20 disabled:opacity-60"
+                    >
+                      {emailStatus?.loading ? (
+                        <LoaderCircle className="size-4 animate-spin text-[#e9c46a]" />
+                      ) : (
+                        <Mail className="size-4 text-[#e9c46a]" />
+                      )}
+                      Email advisory to farmer ({farmerEmail})
+                    </button>
+                    <a
+                      href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+                        farmerEmail || 'deshmukhtanaya90@gmail.com'
+                      )}&su=${encodeURIComponent(
+                        needsWater
+                          ? `💧 [Annadata Alert] Irrigation Recommended for ${crop} - Field 01 Mumbai`
+                          : `🌱 [Annadata Notice] Soil Moisture Healthy for ${crop} (${moisture}%) - Holding Pump`
+                      )}&body=${encodeURIComponent(
+                        needsWater
+                          ? `Annadata Irrigation Advisory\n\nLocation: Field 01 · Mumbai, MH\nCrop: ${crop}\nSoil Moisture: ${moisture}% (Threshold: ${currentCrop.threshold}%)\nStatus: Irrigation Recommended\nOptimal Clean Window: ${windowDisplay}\n\nField soil moisture is below the crop threshold. Irrigating during the clean energy window saves power and avoids carbon emissions.`
+                          : `Annadata Soil Moisture Notice\n\nLocation: Field 01 · Mumbai, MH\nCrop: ${crop}\nSoil Moisture: ${moisture}% (Threshold: ${currentCrop.threshold}%)\nStatus: Soil is wet. No watering needed right now. Pump is on standby to conserve electricity.`
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-2 text-[11px] font-bold text-white/90 transition hover:bg-white/15"
+                    >
+                      <ExternalLink className="size-3 text-[#e9c46a]" /> Open & Send in Gmail
+                    </a>
+                    {emailStatus && (
+                      <p
+                        className={`mt-1 text-center text-[11px] font-semibold ${
+                          emailStatus.success ? 'text-[#b6dfa9]' : 'text-[#f5dc99]'
+                        }`}
+                      >
+                        {emailStatus.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* Section 04: Farmer Alert */}
+          <section className="mt-16" data-testid="card-alert">
+            <SectionLabel
+              number="04"
+              eyebrow="Farmer alert"
+              title="The right message, at the right time"
+              description="Clear, low-bandwidth updates for the people making the decisions."
+            />
+            <div className="flex flex-col gap-8 rounded-2xl border border-[#cfe0d2] bg-[#f0f6ef] p-6 dark:border-white/10 dark:bg-[#1a3327] md:flex-row md:items-center md:justify-between md:p-8">
+              <div className="max-w-md flex-1">
+                <div className="flex gap-2 rounded-full bg-[#fffdf7] px-1 py-1 shadow-sm dark:bg-[#fffdf7]/10">
+                  <button
+                    type="button"
+                    onClick={() => setAlertLang('English')}
+                    className={`flex-1 rounded-full px-3 py-2 text-xs font-bold transition ${
+                      alertLang === 'English' ? 'bg-[#1b4332] text-white' : 'text-muted-foreground'
+                    }`}
+                  >
+                    English
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAlertLang('हिंदी / मराठी')}
+                    className={`flex-1 rounded-full px-3 py-2 text-xs font-bold transition ${
+                      alertLang !== 'English' ? 'bg-[#1b4332] text-white' : 'text-muted-foreground'
+                    }`}
+                  >
+                    हिंदी / मराठी
+                  </button>
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-[#dce9df] bg-[#fffdf7] p-5 shadow-sm dark:border-white/10 dark:bg-[#244433]">
+                  <div className="mb-4 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    <span>AD-ANNADT</span>
+                    <span>{timeString}</span>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#dfeee1] text-[#1b4332]">
+                      <Sprout className="size-4" />
+                    </div>
+                    <div
+                      className="rounded-2xl rounded-tl-sm bg-[#eaf3e9] px-4 py-3 text-sm leading-6 text-[#1b4332] dark:bg-[#1b4332] dark:text-[#eaf6ea]"
+                      data-testid="text-alert-preview"
+                    >
+                      {alertLang === 'English' ? (
+                        needsWater ? (
+                          <>
+                            Your field is ready for irrigation. Soil moisture is at <b>{moisture}%</b> (threshold: {currentCrop.threshold}%). Run the pump between <b>{windowDisplay}</b> when power is cleaner. Save {co2Avoided} kg CO2 this season.
+                          </>
+                        ) : (
+                          <>
+                            No watering needed right now. Soil is wet at <b>{moisture}%</b>, above the {currentCrop.threshold}% threshold for {crop.toLowerCase()}. Pump is on standby to save power.
+                          </>
+                        )
+                      ) : (
+                        needsWater ? (
+                          <>
+                            आपका खेत तैयार है। मिट्टी की नमी <b>{moisture}%</b> है (सीमा {currentCrop.threshold}%)। पंप <b>सुबह 11–दोपहर 2 बजे</b> चलाएं — बिजली साफ़ है।
+                          </>
+                        ) : (
+                          <>
+                            अभी सिंचाई की जरूरत नहीं है। मिट्टी गीली है (<b>{moisture}%</b>), जो {currentCrop.threshold}% सीमा से ऊपर है। पंप स्टैंडबाय पर है।
+                          </>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Email Dispatch Console */}
+              <div className="flex flex-1 flex-col justify-between rounded-2xl border border-[#cfe0d2] bg-[#fffdf7] p-6 shadow-sm dark:border-white/10 dark:bg-[#1a3327] md:min-w-[340px]">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#477653] dark:text-[#b7d88b]">
+                      <Mail className="size-4" /> Live Email Advisory
+                    </span>
+                    <span className="rounded-md bg-[#eaf3e9] px-2 py-0.5 text-[10px] font-bold text-[#2d6a4f] dark:bg-[#204633] dark:text-[#c9e8cd]">
+                      Verified ID
+                    </span>
+                  </div>
+
+                  <h3 className="mt-3 text-base font-black text-[#1b4332] dark:text-[#edf7ed]">
+                    Send Advisory to Farmer
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                    Dispatch real-time irrigation guidance & soil telemetry directly to the farmer&apos;s verified inbox.
+                  </p>
+
+                  <div className="mt-4">
+                    <label className="block text-[11px] font-bold text-[#1b4332] dark:text-[#dcefdc] mb-1">
+                      Farmer Authenticated Email:
+                    </label>
+                    <input
+                      type="email"
+                      value={farmerEmail}
+                      onChange={(e) => setFarmerEmail(e.target.value)}
+                      placeholder="deshmukhtanaya90@gmail.com"
+                      className="w-full rounded-xl border border-[#dce9df] bg-[#f7faf6] px-3.5 py-2.5 text-xs font-semibold text-[#1b4332] outline-none transition focus:border-[#2d6a4f] dark:border-white/10 dark:bg-[#12231b] dark:text-white"
+                    />
+                  </div>
+
+                  {emailStatus && (
+                    <div
+                      className={`mt-3 rounded-xl p-3 text-xs font-bold leading-5 ${
+                        emailStatus.success
+                          ? 'border border-[#a3d9b0] bg-[#eaf7eb] text-[#24583b] dark:bg-[#204633] dark:text-[#c9e8cd]'
+                          : 'border border-[#f8c27a] bg-[#fff5e6] text-[#b36200]'
+                      }`}
+                    >
+                      {emailStatus.message}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-5 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSendEmail()}
+                    disabled={emailStatus?.loading}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#1b4332] px-4 py-3 text-xs font-bold text-white shadow-md transition hover:bg-[#24543d] disabled:opacity-60"
+                  >
+                    {emailStatus?.loading ? (
+                      <LoaderCircle className="size-4 animate-spin text-[#e9c46a]" />
+                    ) : (
+                      <Send className="size-4 text-[#e9c46a]" />
+                    )}
+                    Send Email Advisory to Farmer
+                  </button>
+
+                  <a
+                    href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+                      farmerEmail || 'deshmukhtanaya90@gmail.com'
+                    )}&su=${encodeURIComponent(
+                      needsWater
+                        ? `💧 [Annadata Alert] Irrigation Recommended for ${crop} - Field 01 Mumbai`
+                        : `🌱 [Annadata Notice] Soil Moisture Healthy for ${crop} (${moisture}%) - Holding Pump`
+                    )}&body=${encodeURIComponent(
+                      needsWater
+                        ? `Annadata Irrigation Advisory\n\nLocation: Field 01 · Mumbai, MH\nCrop: ${crop}\nSoil Moisture: ${moisture}% (Threshold: ${currentCrop.threshold}%)\nStatus: Irrigation Recommended\nOptimal Clean Window: ${windowDisplay}\n\nField soil moisture is below the crop threshold. Irrigating during the clean energy window saves power and avoids carbon emissions.\n\n— Annadata Precision Irrigation Scheduler`
+                        : `Annadata Soil Moisture Notice\n\nLocation: Field 01 · Mumbai, MH\nCrop: ${crop}\nSoil Moisture: ${moisture}% (Threshold: ${currentCrop.threshold}%)\nStatus: Soil is wet. No watering needed right now.\nPump Status: Holding on standby to conserve electricity and avoid overwatering.\n\n— Annadata Precision Irrigation Scheduler`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#2d6a4f]/25 bg-[#2d6a4f]/10 py-2.5 px-4 text-xs font-bold text-[#1b4332] transition hover:bg-[#2d6a4f]/20 dark:border-white/15 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
+                  >
+                    <Mail className="size-3.5 text-[#2d6a4f] dark:text-[#b7d88b]" />
+                    Send via Gmail (Instant)
+                  </a>
+
+                  <a
+                    href={`mailto:${farmerEmail}?subject=${encodeURIComponent(
+                      needsWater
+                        ? `[Annadata Alert] Irrigation Recommended for ${crop} - Field 01 Mumbai`
+                        : `[Annadata Notice] Soil Moisture Healthy for ${crop} (${moisture}%)`
+                    )}&body=${encodeURIComponent(
+                      needsWater
+                        ? `Annadata Irrigation Advisory\n\nLocation: Field 01 · Mumbai, MH\nCrop: ${crop}\nSoil Moisture: ${moisture}% (Threshold: ${currentCrop.threshold}%)\nAction: Irrigation Recommended between ${windowDisplay}\n\nSave energy and avoid coal emissions by irrigating during clean grid hours.`
+                        : `Annadata Soil Moisture Notice\n\nLocation: Field 01 · Mumbai, MH\nCrop: ${crop}\nSoil Moisture: ${moisture}% (Threshold: ${currentCrop.threshold}%)\nStatus: Soil is wet. No watering needed right now. Pump is on standby.`
+                    )}`}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#dce9df] bg-white py-2 text-[11px] font-bold text-[#1b4332] transition hover:bg-[#f7faf6] dark:border-white/10 dark:bg-transparent dark:text-white dark:hover:bg-white/5"
+                  >
+                    <ExternalLink className="size-3 text-muted-foreground" /> Open in Mail App
+                  </a>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 05: Tomorrow's Forecast */}
+          <section className="mt-16" data-testid="card-forecast">
+            <SectionLabel
+              number="05"
+              eyebrow="Tomorrow's forecast"
+              title="Plan one day ahead"
+              description="A model trained to spot a cleaner 3-hour window before the day begins."
+            />
+            <div className="rounded-2xl border border-[#cfe0d2] bg-[#fffdf7] p-5 shadow-[0_12px_45px_rgba(27,67,50,.06)] dark:border-white/10 dark:bg-[#1a3327] sm:p-7">
+              <div className="mb-7 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <span className="text-5xl font-black tracking-[-.07em] text-[#1b4332] dark:text-[#eef9ef]">
+                    {forecastApi.data?.mape ?? '8.6'}%
+                  </span>
+                  <span className="ml-2 text-sm font-bold text-muted-foreground">MAPE</span>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    on a held-out test · tomorrow&apos;s clean-energy curve
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-4 text-[11px] font-semibold text-muted-foreground">
+                  <span className="flex items-center gap-2">
+                    <i className="h-0.5 w-5 bg-[#5f9f68]" />
+                    Tomorrow predicted
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <i className="w-5 border-t-2 border-dashed border-[#c8942c]" />
+                    Today actual
+                  </span>
+                </div>
+              </div>
+
+              <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={forecastChartData} margin={{ top: 10, right: 5, left: -22, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="cleanFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#5f9f68" stopOpacity={0.3} />
+                        <stop offset="1%" stopColor="#5f9f68" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid vertical={false} stroke="#dce9df" strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="hour"
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 10, fill: '#77907d' }}
+                      interval={2}
+                    />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      tick={{ fontSize: 10, fill: '#77907d' }}
+                      domain={[0, 100]}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <Tooltip contentStyle={{ borderRadius: 12, border: '1px solid #dce9df', fontSize: 12 }} />
+                    <ReferenceArea x1="11a" x2="2p" fill="#e9c46a" fillOpacity={0.14} />
+                    <Area type="monotone" dataKey="tomorrow" stroke="#5f9f68" strokeWidth={3} fill="url(#cleanFill)" />
+                    <Line
+                      type="monotone"
+                      dataKey="today"
+                      stroke="#c8942c"
+                      strokeDasharray="5 5"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#edf2ed] pt-5 text-xs dark:border-white/10">
+                <span className="text-muted-foreground">
+                  Seasonal-naive baseline <b className="text-[#1b4332] dark:text-white">14.2% MAPE</b>{' '}
+                  <ArrowRight className="mx-1 inline size-3" /> linear model{' '}
+                  <b className="text-[#1b4332] dark:text-white">8.6% MAPE</b>
+                </span>
+                <span className="flex items-center gap-1.5 font-bold text-[#477653] dark:text-[#b7d88b]">
+                  <Lightbulb className="size-4" />
+                  Best window: 11 AM–2 PM
+                </span>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 06: Storage Check & Ripeness */}
+          <section className="mt-16" data-testid="card-ripeness">
+            <SectionLabel
+              number="06"
+              eyebrow="Storage check"
+              title="Keep good produce from becoming waste"
+              description="Optical spectrometry helps cooling respond to produce condition and storage stability."
+            />
+            <div className="grid gap-8 lg:grid-cols-[.9fr_1.1fr]">
+              {/* Camera Preview / Crop Preview Box */}
+              <div className="relative flex min-h-[320px] flex-col justify-between overflow-hidden rounded-2xl bg-[#253f2e] p-6 text-white">
+                <div
+                  className={`absolute inset-0 opacity-80 ${
+                    sample === 'Spoiling'
+                      ? 'bg-gradient-to-br from-[#6c3d2d] via-[#3a4c2d] to-[#1a291f]'
+                      : sample === 'Ripe'
+                      ? 'bg-gradient-to-br from-[#8c783d] via-[#4c652f] to-[#1a291f]'
+                      : 'bg-gradient-to-br from-[#537747] via-[#2e5536] to-[#1a291f]'
+                  }`}
+                />
+                <div className="relative flex items-center justify-between">
+                  <span className="rounded-full bg-black/20 px-3 py-1.5 text-[11px] font-bold backdrop-blur">
+                    Camera preview
+                  </span>
+                  <Camera className="size-5 text-white/70" />
+                </div>
+
+                <div className="relative flex flex-1 items-center justify-center">
+                  <div className="flex size-40 items-center justify-center rounded-full border border-white/20 bg-[#fffdf7]/10 shadow-2xl backdrop-blur-sm">
+                    <div
+                      className={`size-28 rounded-full shadow-inner transition-all duration-500 ${
+                        sample === 'Spoiling'
+                          ? 'bg-gradient-to-br from-[#4a2e2b] via-[#3a1d1d] to-[#1d1212]'
+                          : sample === 'Ripe'
+                          ? 'bg-gradient-to-br from-[#d9534f] via-[#c9302c] to-[#7a1818]'
+                          : sample === 'Turning'
+                          ? 'bg-gradient-to-br from-[#8aa54c] via-[#d49a37] to-[#5a3a27]'
+                          : 'bg-gradient-to-br from-[#4ca54c] via-[#5cb85c] to-[#255625]'
+                      }`}
+                      data-testid="img-ripeness-preview"
                     />
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          <button
-            type="button"
-            onClick={copyResult}
-            data-testid="button-copy-ripeness"
-            className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800"
-          >
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied ? 'Copied to clipboard' : 'Copy field note'}
-          </button>
-        </div>
-      )}
-
-      <CameraPreviewModal
-        isOpen={isCameraOpen}
-        onClose={() => setIsCameraOpen(false)}
-        onCapture={(imageData, imageName) => {
-          submit(imageData, imageName);
-        }}
-      />
-    </section>
-  );
-}
-
-function Home() {
-  const [soilMoisture, setSoilMoisture] = useState(38);
-  const [showHow, setShowHow] = useState(false);
-  const [alertCopied, setAlertCopied] = useState(false);
-
-  // Simulated root-zone decay loop
-  useEffect(() => {
-    const TICK_MS = 4000;
-    const interval = window.setInterval(() => {
-      setSoilMoisture((value) => {
-        const hour = new Date().getHours();
-        const inCleanWindow = hour >= 12 && hour < 15;
-        const isThirsty = value <= 34;
-
-        if (isThirsty && inCleanWindow) {
-          return Math.min(100, Math.round(value + 12 + Math.random() * 6));
-        }
-
-        const heatFactor = hour >= 10 && hour <= 16 ? 1.6 : 1;
-        const drift = (0.6 + Math.random() * 0.6) * heatFactor;
-        return Math.max(0, Math.round(value - drift));
-      });
-    }, TICK_MS);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  const energy = useGetCleanEnergyToday();
-  const forecast = useGetForecast();
-  const scheduleParams = useMemo(() => ({ soil_moisture: soilMoisture, crop_threshold: 34 }), [soilMoisture]);
-  const schedule = useGetSchedule(scheduleParams);
-  const scheduleValue = schedule.data as ScheduleRecommendation | undefined;
-  const energyValue = energy.data as CleanEnergyToday | undefined;
-  const forecastValue = forecast.data as ForecastResult | undefined;
-
-  const needsWater = scheduleValue?.start_label != null;
-  const liveStart = scheduleValue?.start_label ?? null;
-  const liveEnd = scheduleValue?.end_label ?? null;
-  const liveReason = scheduleValue?.reason ?? 'Analyzing real-time soil telemetry and energy curves\u2026';
-  const alertText = needsWater
-    ? `GreenWindow: irrigate ${liveStart}\u2013${liveEnd}. Soil moisture is ${soilMoisture}%. ${liveReason}`
-    : `GreenWindow: no irrigation needed right now. Soil moisture is ${soilMoisture}%. ${liveReason}`;
-
-  const copyAlert = async () => {
-    await navigator.clipboard?.writeText(alertText);
-    setAlertCopied(true);
-    window.setTimeout(() => setAlertCopied(false), 1800);
-  };
-
-  const currentHourCleanPct =
-    energyValue?.curve.find((p) => p.hour === energyValue?.current_hour)?.clean_pct ?? 74;
-
-  return (
-    <div className="min-h-screen bg-neutral-50/70 text-neutral-900 font-sans antialiased">
-      {/* Sleek Base-Nova Sticky Header */}
-      <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3" data-testid="brand-greenwindow">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-neutral-900 text-white shadow-sm">
-              <Sprout className="h-5 w-5 text-emerald-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-base font-bold tracking-tight text-neutral-900">GreenWindow</span>
-                <span className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.2 text-[10px] font-semibold text-emerald-700">
-                  Telemetry v2.4
-                </span>
-              </div>
-              <p className="text-[11px] text-neutral-500">Clean-Energy Irrigation Scheduling Desk</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* Live Model Indicator */}
-            <div className="hidden items-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/80 px-3 py-1 text-xs font-medium text-emerald-800 sm:flex">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>India Energy Atlas Model Active</span>
-            </div>
-
-            {/* Date Indicator */}
-            <div className="hidden items-center gap-1.5 rounded-lg border border-neutral-200 bg-neutral-100/70 px-2.5 py-1 text-xs font-medium text-neutral-600 md:flex">
-              <Clock className="h-3.5 w-3.5 text-neutral-500" />
-              <span>{formatDate(energyValue?.date)}</span>
-            </div>
-
-            {/* How It Works Button */}
-            <button
-              type="button"
-              onClick={() => setShowHow(true)}
-              data-testid="button-how-it-works"
-              className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-neutral-700 shadow-xs transition hover:bg-neutral-50 hover:text-neutral-900"
-            >
-              <CircleHelp className="h-3.5 w-3.5 text-emerald-600" />
-              <span>How it works</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {/* Top Hero / Status Bar */}
-        <section className="mb-6 rounded-2xl border border-neutral-200/80 bg-white p-6 shadow-xs">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
-                <span>DECISION TELEMETRY CONSOLE</span>
-              </div>
-              <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-neutral-900">
-                Smart irrigation scheduled for clean grid hours.
-              </h1>
-              <p className="mt-1 text-xs sm:text-sm text-neutral-500 max-w-2xl leading-relaxed">
-                Recommending contiguous pumping windows based on clean energy fuel-mix patterns and root-zone soil thirst.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2">
-                <p className="gw-mono text-[9px] font-bold uppercase tracking-wider text-neutral-500">Current Hour</p>
-                <p className="mt-0.5 text-base font-bold text-neutral-900" data-testid="text-current-hour">
-                  {energyValue ? formatHour(energyValue.current_hour) : '—'}
-                </p>
+                <div className="relative flex gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={onFileChange}
+                    className="hidden"
+                    data-testid="input-ripeness-file"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    data-testid="button-upload-ripeness"
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#fffdf7] px-3 py-2.5 text-xs font-bold text-[#1b4332] shadow-sm transition hover:bg-white"
+                  >
+                    <Upload className="size-4" />
+                    Upload photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCameraOpen(true)}
+                    data-testid="button-use-ripeness-sample"
+                    className="flex items-center justify-center gap-2 rounded-lg bg-[#fffdf7]/15 px-4 py-2.5 text-xs font-bold backdrop-blur transition hover:bg-[#fffdf7]/25"
+                  >
+                    <Camera className="size-4" />
+                    Use camera
+                  </button>
+                </div>
               </div>
 
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2">
-                <p className="gw-mono text-[9px] font-bold uppercase tracking-wider text-emerald-800">System Status</p>
-                <p className="mt-0.5 flex items-center gap-1.5 text-base font-bold text-emerald-700">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Live Sync
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* 4 Stat Overview Cards */}
-          <div className="mt-6 grid grid-cols-2 gap-3.5 lg:grid-cols-4 border-t border-neutral-100 pt-5">
-            <div className="rounded-xl border border-neutral-200/60 bg-neutral-50/70 p-3.5">
-              <p className="gw-mono text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-                Clean Supply Share
-              </p>
-              <p className="mt-1 text-2xl font-bold text-neutral-900">{currentHourCleanPct}%</p>
-              <p className="mt-0.5 text-[11px] text-emerald-700 font-medium">Solar & wind active</p>
-            </div>
-
-            <div className="rounded-xl border border-neutral-200/60 bg-neutral-50/70 p-3.5">
-              <p className="gw-mono text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-                Field Soil Moisture
-              </p>
-              <p className="mt-1 text-2xl font-bold text-neutral-900">{soilMoisture}%</p>
-              <p
-                className={`mt-0.5 text-[11px] font-medium ${
-                  soilMoisture <= 34 ? 'text-amber-600' : 'text-emerald-700'
-                }`}
-              >
-                {soilMoisture <= 34 ? 'Thirsty (≤34%)' : 'Holding well'}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-neutral-200/60 bg-neutral-50/70 p-3.5">
-              <p className="gw-mono text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-                Irrigation Window
-              </p>
-              <p className="mt-1 text-xl font-bold text-neutral-900 truncate">
-                {needsWater ? `${liveStart}–${liveEnd}` : 'Holding'}
-              </p>
-              <p className="mt-0.5 text-[11px] text-neutral-500 font-medium">
-                {needsWater ? `${scheduleValue?.duration_hours}h optimized block` : 'Pump idle'}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-neutral-200/60 bg-neutral-50/70 p-3.5">
-              <p className="gw-mono text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-                CO₂ Avoided Today
-              </p>
-              <p className="mt-1 text-2xl font-bold text-emerald-700">
-                {scheduleValue?.co2_avoided_kg ?? 0} <span className="text-xs font-semibold text-neutral-500">kg</span>
-              </p>
-              <p className="mt-0.5 text-[11px] text-neutral-500 font-medium">
-                {scheduleValue?.kwh_saved ?? 0} kWh saved vs baseline
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Core Decision Grid */}
-        <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr]">
-          {/* Section 01: Soil Moisture Control */}
-          <section className="gw-card p-6" data-testid="card-soil-control">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <span className="gw-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                  01 / ROOT-ZONE FIELD TELEMETRY
-                </span>
-                <h2 className="mt-1 text-xl font-bold text-neutral-900">How thirsty is the field?</h2>
-                <p className="mt-0.5 text-xs text-neutral-500">
-                  Adjust simulated soil moisture reading or test crop threshold reactions.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-semibold text-neutral-700">
-                <Droplets className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Crop Threshold: 34%</span>
-              </div>
-            </div>
-
-            <div className="mt-6 rounded-xl border border-neutral-200/90 bg-neutral-50/80 p-6">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <div className="flex items-baseline">
-                    <span
-                      className="text-5xl font-extrabold tracking-tight text-neutral-900"
-                      data-testid="text-soil-moisture"
-                    >
-                      {soilMoisture}
-                    </span>
-                    <span className="ml-1 text-2xl font-bold text-neutral-400">%</span>
-                  </div>
-                  <div className="mt-2">
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold border ${
-                        soilMoisture <= 34
-                          ? 'border-amber-300 bg-amber-50 text-amber-800'
-                          : 'border-emerald-300 bg-emerald-50 text-emerald-800'
+              {/* Optical Spectrometry Result & Cooling Trigger */}
+              <div className="rounded-2xl border border-[#cfe0d2] bg-[#fffdf7] p-6 dark:border-white/10 dark:bg-[#1a3327]">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                      Optical spectrometry verdict
+                    </p>
+                    <h3
+                      className={`mt-2 text-3xl font-black ${
+                        accent === 'amber'
+                          ? 'text-[#b67825]'
+                          : accent === 'green'
+                          ? 'text-[#477653] dark:text-[#b7d88b]'
+                          : 'text-[#6c7f72]'
                       }`}
+                      data-testid="status-ripeness-result"
                     >
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${
-                          soilMoisture <= 34 ? 'bg-amber-500' : 'bg-emerald-500'
-                        }`}
-                      />
-                      {soilMoisture <= 34 ? 'Thirsty — Below 34% threshold' : 'Optimal Moisture — Above 34% threshold'}
-                    </span>
+                      {verdict}
+                    </h3>
+                  </div>
+                  <div className="flex size-12 items-center justify-center rounded-full bg-[#eef6ed] dark:bg-[#204633]">
+                    <ThermometerSun className="size-6 text-[#5f9f68] dark:text-[#b7d88b]" />
                   </div>
                 </div>
 
-                <div className="hidden sm:block text-right">
-                  <p className="gw-mono text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">
-                    Telemetry Node
-                  </p>
-                  <p className="text-xs font-bold text-neutral-700 mt-0.5">NW-04 · North Plot</p>
-                  <p className="text-[11px] text-neutral-500">Rice / Paddy Field</p>
-                </div>
-              </div>
-
-              {/* Slider Component */}
-              <div className="mt-6">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={soilMoisture}
-                  onChange={(event) => setSoilMoisture(Number(event.target.value))}
-                  style={{ '--slider-progress': `${soilMoisture}%` } as CSSProperties}
-                  className="gw-slider w-full"
-                  data-testid="input-soil-moisture"
-                  aria-label="Soil moisture percentage"
-                />
-
-                <div className="mt-2.5 flex justify-between text-[11px] font-semibold text-neutral-400 gw-mono">
-                  <span>0% (Parched)</span>
-                  <span className="text-emerald-700">34% Threshold</span>
-                  <span>100% (Saturated)</span>
-                </div>
-              </div>
-
-              {/* Quick Preset Buttons for Testing */}
-              <div className="mt-5 border-t border-neutral-200 pt-4">
-                <p className="text-[11px] font-semibold text-neutral-500 mb-2">Simulate field condition:</p>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { label: 'Dry Field (22%)', val: 22 },
-                    { label: 'At Threshold (33%)', val: 33 },
-                    { label: 'Moist (45%)', val: 45 },
-                    { label: 'Well Watered (68%)', val: 68 },
-                  ].map((preset) => (
+                <div className="mt-6 flex flex-wrap gap-2">
+                  {(['Unripe', 'Ripe', 'Turning', 'Spoiling'] as const).map((item) => (
                     <button
-                      key={preset.val}
+                      key={item}
                       type="button"
-                      onClick={() => setSoilMoisture(preset.val)}
-                      className={`rounded-lg px-2.5 py-1 text-xs font-medium border transition ${
-                        soilMoisture === preset.val
-                          ? 'border-emerald-600 bg-emerald-50 text-emerald-700 font-bold'
-                          : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+                      onClick={() => {
+                        setSample(item);
+                        if (item === 'Spoiling') setCooling(true);
+                        else setCooling(false);
+                      }}
+                      className={`rounded-full border px-3 py-1.5 text-[11px] font-bold transition ${
+                        sample === item
+                          ? 'border-[#1b4332] bg-[#1b4332] text-white'
+                          : 'border-[#dce9df] text-muted-foreground hover:border-[#9fbea3] dark:border-white/15'
                       }`}
                     >
-                      {preset.label}
+                      Try {item}
                     </button>
                   ))}
                 </div>
-              </div>
-            </div>
 
-            <div className="mt-4 flex items-center gap-2 text-xs text-neutral-500">
-              <LockKeyhole className="h-3.5 w-3.5 text-emerald-600" />
-              <span>Hardware-ready simulated signal with manual slider override.</span>
+                <div className="mt-7 flex flex-col gap-3">
+                  {[
+                    ['Green / unripe', sample === 'Unripe' ? 68 : sample === 'Spoiling' ? 18 : 42, 'bg-[#6b994a]'],
+                    ['Red / orange', sample === 'Ripe' ? 54 : sample === 'Spoiling' ? 30 : 24, 'bg-[#d38e39]'],
+                    ['Dark / brown', sample === 'Spoiling' ? 52 : 12, 'bg-[#6d4933]'],
+                  ].map(([label, value, color]) => (
+                    <div key={label as string} className="flex items-center gap-3 text-xs">
+                      <span className="w-28 text-muted-foreground">{label}</span>
+                      <div className="h-2 flex-1 rounded-full bg-[#edf2ed] dark:bg-white/10">
+                        <div
+                          className={`h-2 rounded-full ${color}`}
+                          style={{ width: `${value}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right font-bold">{value}%</span>
+                    </div>
+                  ))}
+                </div>
+
+                {verdict === 'Spoiling risk' && (
+                  <div className="mt-6 rounded-lg bg-[#fff7df] px-3 py-2.5 text-xs font-bold text-[#896425]">
+                    Move this batch to market before it is lost.
+                  </div>
+                )}
+
+                <div className="mt-7 flex items-center justify-between rounded-xl bg-[#f7faf6] p-3 dark:bg-[#fffdf7]/5">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`flex size-9 items-center justify-center rounded-full ${
+                        cooling
+                          ? 'bg-[#dceef0] text-[#34757b]'
+                          : 'bg-[#eaf3e9] text-[#477653] dark:bg-[#204633] dark:text-[#b7d88b]'
+                      }`}
+                    >
+                      <Fan className={`size-4 ${cooling ? 'animate-spin' : ''}`} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold">
+                        {cooling ? 'Full cooling triggered' : 'Variable, low cooling'}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {cooling
+                          ? 'Protecting the batch now'
+                          : 'Saving energy while produce is stable'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCooling(!cooling)}
+                    className="rounded-lg border border-[#cfe0d2] px-3 py-2 text-[11px] font-bold dark:border-white/10 hover:bg-[#eaf3e9] dark:hover:bg-white/10 transition"
+                  >
+                    {cooling ? 'Reduce' : 'Trigger full'}
+                  </button>
+                </div>
+              </div>
             </div>
           </section>
 
-          {/* Section 02: Recommended Window (Hero Dark Neutral Card) */}
-          <section
-            className="rounded-2xl border border-neutral-800 bg-neutral-950 p-6 text-white shadow-md relative overflow-hidden flex flex-col justify-between"
-            data-testid="card-recommendation"
+          {/* Footer */}
+          <footer className="mt-20 flex flex-col gap-3 border-t border-[#dce9df] pt-6 text-xs text-muted-foreground dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
+            <span className="font-bold text-[#1b4332] dark:text-[#dcefdc]">
+              अन्ना<span className="text-[#c8942c]">data</span> by Sonia Lotlikar and Tanaya Deshmukh
+            </span>
+            <span>
+              Grid data is modelled · soil is simulated · optical crop spectrometry
+            </span>
+          </footer>
+        </div>
+      </main>
+
+      {/* Camera Preview Modal (accessible via "Use camera" button) */}
+      <CameraPreviewModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onCapture={handleCameraCapture}
+      />
+
+      {/* "How It Works" Modal */}
+      {help && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-[#10251a]/60 p-5 backdrop-blur-sm"
+          onClick={() => setHelp(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-2xl bg-[#efe8d8] p-6 text-[#1b4332] shadow-2xl dark:bg-[#1a3327] dark:text-[#eef9ef] sm:p-8"
           >
-            {/* Ambient emerald glow */}
-            <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-emerald-500/15 blur-3xl" />
-
-            <div>
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="gw-mono text-[10px] font-bold uppercase tracking-wider text-emerald-400">
-                    02 / DECISION ENGINE
-                  </span>
-                  <h2 className="mt-1 text-xl font-bold text-white">Your Irrigation Window</h2>
-                </div>
-                <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2 text-emerald-400">
-                  <Zap className="h-5 w-5" />
-                </div>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-[#6b8b76]">How it works</p>
+                <h2 className="mt-2 text-3xl font-black tracking-tight">One simple decision rule.</h2>
               </div>
+              <button
+                type="button"
+                onClick={() => setHelp(false)}
+                className="rounded-full p-2 text-muted-foreground hover:bg-black/5 dark:hover:bg-[#fffdf7]/10"
+              >
+                <span className="sr-only">Close</span>×
+              </button>
+            </div>
 
-              {schedule.isLoading && !scheduleValue ? (
-                <div className="mt-8 space-y-3">
-                  <Skeleton className="h-16 bg-neutral-800" />
-                  <Skeleton className="h-5 w-4/5 bg-neutral-800" />
-                </div>
-              ) : schedule.isError ? (
-                <div className="mt-6 rounded-xl border border-red-900/50 bg-red-950/40 p-4 text-xs text-red-200">
-                  Could not compute schedule.
-                  <button
-                    type="button"
-                    onClick={() => schedule.refetch()}
-                    data-testid="button-retry-schedule"
-                    className="ml-2 font-bold underline text-white"
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {needsWater ? (
-                    <div className="mt-6">
-                      <div className="flex items-center gap-3">
-                        <span
-                          className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white"
-                          data-testid="text-irrigation-window"
-                        >
-                          {liveStart}
-                        </span>
-                        <ChevronRight className="h-6 w-6 text-emerald-400" />
-                        <span className="text-4xl sm:text-5xl font-extrabold tracking-tight text-white">
-                          {liveEnd}
-                        </span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className="rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300 border border-emerald-500/30">
-                          {scheduleValue?.duration_hours}h Contiguous Run
-                        </span>
-                        <span className="text-xs text-neutral-400">Optimal clean power peak</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-6">
-                      <p
-                        className="text-2xl sm:text-3xl font-bold tracking-tight text-neutral-300"
-                        data-testid="text-irrigation-window"
-                      >
-                        Holding — No watering needed
-                      </p>
-                      <p className="mt-2 text-xs text-emerald-400 font-semibold">
-                        Field moisture is above threshold. Saving pump energy.
-                      </p>
-                    </div>
-                  )}
+            <div className="mt-7 rounded-xl bg-[#eaf3e9] p-5 text-lg font-bold leading-7 dark:bg-[#204633]">
+              “Run energy-hungry equipment only when the power is clean and the crop actually needs it.”
+            </div>
 
-                  {/* Decision Explanation Box */}
-                  <div
-                    className="mt-5 rounded-xl border border-neutral-800 bg-neutral-900/80 p-4 text-xs text-neutral-300 leading-relaxed"
-                    data-testid="text-recommendation-reason"
-                  >
-                    <div className="flex items-center gap-1.5 text-emerald-400 font-semibold mb-1">
-                      <Info className="h-3.5 w-3.5" />
-                      <span>Decision Rationale</span>
+            <div className="mt-8 grid gap-3 sm:grid-cols-5 sm:items-center">
+              {['Grid energy mix', 'Soil moisture', 'Storage camera', 'Scheduling engine', 'Farmer alerts'].map(
+                (item, i) => (
+                  <div key={item} className="flex items-center gap-2">
+                    <div
+                      className={`flex min-h-16 flex-1 items-center justify-center rounded-xl border p-3 text-center text-xs font-bold ${
+                        i === 3
+                          ? 'border-[#1b4332] bg-[#1b4332] text-white'
+                          : 'border-[#cfe0d2] bg-[#fffdf7] dark:border-white/10 dark:bg-[#fffdf7]/5'
+                      }`}
+                    >
+                      {item}
                     </div>
-                    {liveReason}
+                    {i < 4 && <MoveRight className="hidden size-4 text-[#9ab69e] sm:block" />}
                   </div>
-                </>
+                ),
               )}
             </div>
 
-            {/* Savings Footnote Bar */}
-            <div className="mt-6 grid grid-cols-2 gap-3 border-t border-neutral-800/80 pt-4">
-              <div>
-                <p className="gw-mono text-[9px] uppercase tracking-wider text-neutral-400 font-semibold">
-                  Clean Energy Saved
-                </p>
-                <p className="mt-1 text-xl font-bold text-white">
-                  {scheduleValue?.kwh_saved ?? '—'} <span className="text-xs font-medium text-neutral-400">kWh</span>
-                </p>
-              </div>
-
-              <div>
-                <p className="gw-mono text-[9px] uppercase tracking-wider text-neutral-400 font-semibold">
-                  CO₂ Emissions Avoided
-                </p>
-                <p className="mt-1 text-xl font-bold text-emerald-400">
-                  {scheduleValue?.co2_avoided_kg ?? '—'} <span className="text-xs font-medium text-neutral-400">kg</span>
-                </p>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        {/* Section 03: 24-Hour Clean Energy Timeline (Full Width) */}
-        <section className="gw-card mt-6 p-6" data-testid="card-clean-energy">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <span className="gw-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                03 / CLEAN SUPPLY TIMELINE
-              </span>
-              <h2 className="mt-1 text-xl font-bold text-neutral-900">Today’s 24-Hour Clean Energy Curve</h2>
-            </div>
-            <p className="max-w-md text-right text-xs leading-5 text-neutral-500">
-              {energyValue?.source_note ?? 'Modeled from published India Energy Atlas fuel-mix patterns.'}
+            <p className="mt-5 text-sm leading-6 text-muted-foreground">
+              The engine turns these signals into irrigation pump timing and cold-storage cooling, then sends alerts in English, Hindi or Marathi.
             </p>
-          </div>
 
-          {energy.isLoading ? (
-            <Skeleton className="mt-6 h-56" />
-          ) : energy.isError || !energyValue ? (
-            <div className="mt-5">
-              <ErrorState label="Clean energy timeline" retry={() => energy.refetch()} />
-            </div>
-          ) : (
-            <CleanEnergyChart
-              data={energyValue}
-              currentHour={energyValue.current_hour}
-              startHour={scheduleValue?.start_hour}
-              endHour={scheduleValue?.end_hour}
-            />
-          )}
-        </section>
-
-        {/* Two-Column Utility Grid (Alert & Forecast) */}
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          {/* Section 04: Ground Dispatch / Farmer Alert */}
-          <section className="gw-card p-6" data-testid="card-alert">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <span className="gw-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                  04 / GROUND DISPATCH
-                </span>
-                <h2 className="mt-1 text-lg font-bold text-neutral-900">Farmer Alert Dispatch</h2>
-                <p className="mt-0.5 text-xs text-neutral-500">Bilingual ready-to-send field SMS & WhatsApp notice.</p>
-              </div>
-              <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-2 text-neutral-600">
-                <CloudSun className="h-5 w-5 text-amber-500" />
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50/70 p-4.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-semibold text-neutral-700">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white">
-                    <Sprout className="h-3 w-3" />
-                  </span>
-                  <span>Field Telegram · North Plot</span>
-                </div>
-                <span className="rounded-md border border-neutral-200 bg-white px-2 py-0.5 text-[10px] font-medium text-neutral-500">
-                  SMS / WhatsApp Ready
-                </span>
-              </div>
-
-              {/* English text */}
-              <div className="mt-3 rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-800 leading-relaxed font-mono">
-                <p data-testid="text-alert-preview">{alertText}</p>
-              </div>
-
-              {/* Hindi / Regional Translation */}
-              <div className="mt-2.5 border-l-2 border-emerald-600 bg-emerald-50/60 pl-3 py-2 text-xs text-neutral-700 leading-relaxed rounded-r-lg">
-                <p className="font-semibold text-emerald-900">
-                  {needsWater
-                    ? `सिंचाई का सही समय: ${liveStart}–${liveEnd}. मिट्टी की नमी ${soilMoisture}% है। स्वच्छ ऊर्जा का उपयोग करें।`
-                    : `अभी सिंचाई की जरूरत नहीं है। मिट्टी की नमी ${soilMoisture}% है।`}
+            <div className="mt-8 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-[#cfe0d2] p-4 dark:border-white/10">
+                <p className="text-xs font-bold uppercase tracking-widest text-[#477653] dark:text-[#b7d88b]">
+                  Simulated now
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Grid mix, soil moisture, forecast curve and optical crop spectrometry.
                 </p>
               </div>
-
-              <div className="mt-4 flex items-center justify-between border-t border-neutral-200 pt-3 text-xs text-neutral-500">
-                <span>Automated from live telemetry</span>
-                <button
-                  type="button"
-                  onClick={copyAlert}
-                  data-testid="button-copy-alert"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 font-semibold text-emerald-700 shadow-xs hover:bg-neutral-50 hover:text-emerald-800 transition"
-                >
-                  {alertCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  {alertCopied ? 'Copied to Clipboard' : 'Copy Notice'}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {/* Section 05: Forecast Accuracy */}
-          <section className="gw-card p-6" data-testid="card-forecast">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <span className="gw-mono text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-                  05 / MODEL CHECK
-                </span>
-                <h2 className="mt-1 text-lg font-bold text-neutral-900">Forecast Accuracy</h2>
-                <p className="mt-0.5 text-xs text-neutral-500">Tomorrow’s predicted clean curve vs holdout benchmark.</p>
-              </div>
-
-              <div className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
-                <ArrowDownRight className="h-3.5 w-3.5" />
-                <span>{forecastValue ? `${forecastValue.mape}% MAPE` : '—'}</span>
+              <div className="rounded-xl border border-[#cfe0d2] p-4 dark:border-white/10">
+                <p className="text-xs font-bold uppercase tracking-widest text-[#477653] dark:text-[#b7d88b]">
+                  Hardware-ready
+                </p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Capacitive soil sensors, pump energy patterns, camera input and SMS delivery.
+                </p>
               </div>
             </div>
 
-            {forecast.isLoading ? (
-              <Skeleton className="mt-5 h-44" />
-            ) : forecast.isError || !forecastValue ? (
-              <div className="mt-5">
-                <ErrorState label="Forecast" retry={() => forecast.refetch()} />
-              </div>
-            ) : (
-              <>
-                <ForecastChart data={forecastValue} />
-                <div className="mt-4 flex items-center justify-between border-t border-neutral-100 pt-3 text-xs text-neutral-500">
-                  <span>{forecastValue.model_used}</span>
-                  <span className="rounded bg-neutral-100 px-2 py-0.5 font-medium text-neutral-700">
-                    Directionally Reliable
-                  </span>
-                </div>
-              </>
-            )}
-          </section>
+            <button
+              type="button"
+              onClick={() => setHelp(false)}
+              className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-[#1b4332] py-3 text-sm font-bold text-white shadow-md transition hover:bg-[#255625]"
+            >
+              Got it <Check className="size-4" />
+            </button>
+          </motion.div>
         </div>
-
-        {/* Section 06: Ripeness Desk with Camera Preview */}
-        <div className="mt-6">
-          <RipenessCard />
-        </div>
-
-        {/* Section 07: Pump Health & Anomaly Check */}
-        <div className="mt-6">
-          <AnomalyCard />
-        </div>
-
-        {/* Footer */}
-        <footer className="mt-12 flex flex-col justify-between gap-3 border-t border-neutral-200 py-6 text-xs text-neutral-500 sm:flex-row sm:items-center">
-          <span className="flex items-center gap-2 font-medium">
-            <Sprout className="h-4 w-4 text-emerald-600" /> GreenWindow · Precision Irrigation Decision Engine
-          </span>
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" /> Modeled grid telemetry
-            </span>
-            <span>Refreshes dynamically</span>
-          </div>
-        </footer>
-      </main>
-
-      {showHow && <Modal onClose={() => setShowHow(false)} />}
+      )}
     </div>
   );
 }
-
-export default Home;
