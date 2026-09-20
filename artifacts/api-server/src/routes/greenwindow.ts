@@ -319,8 +319,11 @@ router.post("/send-alert-email", async (req, res) => {
       smtp,
     } = req.body || {};
 
-    const targetEmail = (recipient_email && String(recipient_email).trim()) || "deshmukhtanaya90@gmail.com";
-
+    const targetEmail = recipient_email && String(recipient_email).trim();
+    if (!targetEmail) {
+      res.status(400).json({ error: "recipient_email is required." });
+      return;
+    }
     const subject = needs_water
       ? `💧 [Annadata Alert] Irrigation Recommended for ${crop} (${location}) - Window: ${window_display}`
       : `🌱 [Annadata Notice] Soil Moisture Healthy for ${crop} (${moisture}%) - Holding Pump`;
@@ -344,11 +347,10 @@ router.post("/send-alert-email", async (req, res) => {
           </div>
 
           <div style="padding: 24px;">
-            <div style="display: inline-block; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-bottom: 16px; ${
-              needs_water
-                ? 'background-color: #ffeed6; color: #b36200; border: 1px solid #f8c27a;'
-                : 'background-color: #d8eed8; color: #24583b; border: 1px solid #a3d9b0;'
-            }">
+            <div style="display: inline-block; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-bottom: 16px; ${needs_water
+        ? 'background-color: #ffeed6; color: #b36200; border: 1px solid #f8c27a;'
+        : 'background-color: #d8eed8; color: #24583b; border: 1px solid #a3d9b0;'
+      }">
               ${needs_water ? '💧 Action Recommended: Irrigate in Clean Window' : '🌱 Standby: Soil Moisture Sufficient'}
             </div>
 
